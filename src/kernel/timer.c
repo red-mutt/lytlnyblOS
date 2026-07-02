@@ -25,7 +25,7 @@ void timer_init(uint32_t frequency) {
 void timer_handler() {
     ticks++;
     if ((ticks % 100) == 0) {
-        vga_text_writeline(&terminal, " 1 second ");
+        //vga_text_writeline(&terminal, " 1 second ");
     }
 }
 

@@ -1,6 +1,7 @@
 #include "vga_text.h"
 #include "interrupts.h"
 #include "timer.h"
+#include "keyboard.h"
 
 vga_text terminal;
 
@@ -13,10 +14,11 @@ void kernel_main(void)
     vga[1] = 0x02;
 
     vga_text_init(&terminal);
-    vga_text_writeline(&terminal, "Welcome to the lytlnybl kernel in real mode");
+    vga_text_writeline(&terminal, "Welcome to the lytlnybl kernel in protected mode");
 
     idt_init();
     timer_init(100);
+    keyboard_init();
 
     for (;;);
 }
