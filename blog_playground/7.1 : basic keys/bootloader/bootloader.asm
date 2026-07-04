@@ -16,7 +16,7 @@ load_kernel_from_disk:
     mov es, ax
     
     mov ah, 02h ; service number, 
-    mov al, 10 ; number of sectors we want to read from (only simple kernel for now, so less than 512 bytes)
+    mov al, 09h ; number of sectors we want to read from (only simple kernel for now, so less than 512 bytes)
     
     mov ch, 0h ; number of track we would like to read from, is just 0.
     mov cl, 02h ; sector number that we would like to read its content, this is the second sector

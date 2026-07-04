@@ -94,22 +94,7 @@ void keyboard_handler () {
 
     c[0] = keymap[scancode];
     c[1] = '\0';
-    switch (c[0]) {
-        case '\n':
-            vga_text_writeline(&terminal, "");
-            break;
-        case 27: 
-            vga_text_clear(&terminal);
-            break;
-        case '\b':
-            vga_text_backspace(&terminal);
-            break;
-        case '\t':
-            vga_text_write(&terminal, "    ");
-            break;
-        default:
-            vga_text_write(&terminal, c);
-    }
+    vga_text_write(&terminal, c);
 }
 
 

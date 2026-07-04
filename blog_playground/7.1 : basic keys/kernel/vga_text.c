@@ -46,12 +46,6 @@ void vga_text_putchar(vga_text* terminal, char c) {
     terminal->buffer[index] = entry;
 }
 
-char vga_text_getchar(vga_text* terminal) {
-    size_t index = terminal->row * terminal->width + terminal->column;
-    char c = (uint8_t)(terminal->buffer[index] & 0x00FF);
-    return c;
-}
-
 void vga_text_write(vga_text* terminal, const char* string) {
     size_t pos = terminal->row * terminal->width + terminal->column;
 
@@ -130,18 +124,4 @@ void vga_text_put_entry_at(
     size_t index = row * terminal->width + column;
     uint16_t entry = ((uint16_t)color << 8) | (uint16_t)character;
     terminal->buffer[index] = entry; 
-}
-
-void vga_text_backspace(vga_text* terminal) {
-    if (terminal->row == 0 && terminal->column == 0) return;
-    else if (terminal->column != 0) {
-        terminal->column--;
-    } else {
-        terminal->row--;
-        terminal->column = terminal->width - 1;
-        while (vga_text_getchar(terminal) == ' ') {
-            terminal->column--;
-        }
-    }
-    vga_text_putchar(terminal, ' ');
 }

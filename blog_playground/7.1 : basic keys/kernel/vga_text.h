@@ -95,10 +95,4 @@ void vga_text_put_entry_at(
     size_t column
 );
 
-/* operations added in making input */
-
-void vga_text_backspace(vga_text* terminal);
-char vga_text_getchar(vga_text* terminal);
-
-
 #endif
