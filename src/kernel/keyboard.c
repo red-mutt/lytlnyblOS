@@ -180,12 +180,6 @@ bool keyboard_modifier_keys(uint8_t scancode) {
         return true;
     }
 
-
-    /* tab (bug with not working in other place) */
-    if (scancode == 0xF) {
-        vga_text_write(&terminal, " ");
-    };
-
     return false;
 }
 
