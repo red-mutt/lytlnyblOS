@@ -8,8 +8,29 @@ start:
     mov si, message_string
     call print_string
 
+    call store_memory_map
+
     call load_kernel_from_disk
     jmp 0900h:0000 ; gives control to the kernel by jumping to it's starting point.
+
+store_memory_map:
+    xor ebx, ebx ; first call
+
+next_entry: 
+    mov ax, 0
+    mov es, ax
+    mov di, 6000h ; safe memory location to write the map to
+
+    mov eax, 0xE820
+    mov edx, 'SMAP' ;signiture that says we are requesting E820 memory map service
+    mov ecx, 24
+
+    int 15h
+
+    test ebx, ebx
+    jnz next_entry
+    ret
+
 
 load_kernel_from_disk:
     mov ax, 0900h
