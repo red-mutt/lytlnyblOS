@@ -14,23 +14,35 @@ start:
     jmp 0900h:0000 ; gives control to the kernel by jumping to it's starting point.
 
 store_memory_map:
-    xor ebx, ebx ; first call
+    xor ax, ax
+    mov ds, ax ; in order to get exact addresses and not relative
 
+    xor ebx, ebx ; first call
+    xor bp, bp ; will store entry count
+
+    mov di, memory_map_buffer ; safe memory location to write the map to
 next_entry: 
     mov ax, 0
     mov es, ax
-    mov di, 6000h ; safe memory location to write the map to
-
+ 
     mov eax, 0xE820
-    mov edx, 'SMAP' ;signiture that says we are requesting E820 memory map service
+    mov edx, 0x534D4150 ;signiture that says we are requesting E820 memory map service
     mov ecx, 24
 
     int 15h
 
+    jc done ; jump if there was an error
+
+    add di, 24
+    inc bp
+
     test ebx, ebx
     jnz next_entry
+done:
+    mov [memory_map_entries], bp
+    mov ax, 07C0h
+    mov ds, ax
     ret
-
 
 load_kernel_from_disk:
     mov ax, 0900h
@@ -90,6 +102,9 @@ printing_finished:
 title_string db 'Welcome to the lytlnybl bootloader!',0
 message_string db 'Loading up the kernel for you...',0
 load_error_string db 'Oh oh!, there was a problem loading the kernel',0
+
+memory_map_entries equ 0x4FFC
+memory_map_buffer equ 0x5000
 
 times 510-($-$$) db 0 ; pads the rest of the bootloader with 510 bytes, aiming for a 512 byte bootloader
 dw 0xAA55 ; specifies the end of the bootloader, recognised by bios

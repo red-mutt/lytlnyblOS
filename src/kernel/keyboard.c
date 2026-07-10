@@ -154,7 +154,6 @@ void keyboard_set_shift_keymap(void)
 void keyboard_extended_scancodes() {
     uint8_t scancode = inb(PS2_DATA);
 
-    vga_text_write_hex(&terminal, scancode);    
     /* LGUI */
     if (scancode == 0x5B) {
         vga_text_writeline(&terminal, "LGUI PRESSED");
