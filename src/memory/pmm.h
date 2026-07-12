@@ -2,6 +2,7 @@
 #define PPM_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #define FRAME_SIZE 4096
 #define BITMAP_BASE 0x100000
@@ -17,5 +18,10 @@ void init_pmm();
 
 void bitmap_set_frame(uint32_t frame_index);
 void bitmap_clear_frame(uint32_t frame_index);
+void bitmap_get_frame(uint32_t frame_index);
+void print_bitmap_summary();
+
+void* alloc_frame();
+void free_frame(void* frame_address);
 
 #endif
