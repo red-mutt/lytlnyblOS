@@ -1,4 +1,4 @@
-linclude "pmm.h"
+#include "pmm.h"
 #include "../kernel/vga_text.h"
 
 extern vga_text terminal;
