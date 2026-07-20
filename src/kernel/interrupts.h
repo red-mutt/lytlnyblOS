@@ -136,7 +136,7 @@ extern void isr29(void);
 extern void isr30(void);
 extern void isr31(void);
 
-static void memset(void* ptr, uint8_t val, uint32_t size);
+void memset(void* ptr, uint8_t val, uint32_t size);
 
 
 #endif

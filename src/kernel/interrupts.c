@@ -45,7 +45,7 @@ const char* exception_messages[32] =
 idt_entry_t idt[256];
 idtr_t idtr;
 
-static void memset(void* ptr, uint8_t val, uint32_t size) {
+void memset(void* ptr, uint8_t val, uint32_t size) {
     uint8_t* p = ptr;
 
     for (uint32_t i = 0; i < size; i++) {

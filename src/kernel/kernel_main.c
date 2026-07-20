@@ -3,6 +3,7 @@
 #include "timer.h"
 #include "keyboard.h"
 #include "../memory/pmm.h"
+#include "../memory/vmm.h"
 
 vga_text terminal;
 
@@ -21,6 +22,7 @@ void kernel_main(void)
     timer_init(100);
     keyboard_init();
     init_pmm(); 
+    init_vmm();
 
     for (;;);
 }

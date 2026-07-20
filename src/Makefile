@@ -7,6 +7,8 @@ INTERRUPT_FILE_ASM = kernel/interrupts.asm
 TIMER_FILE_C = kernel/timer.c
 kb_file_c = kernel/keyboard.c
 PMM_FILE_C = memory/pmm.c
+VMM_FILE_C = memory/vmm.c
+VMM_FILE_ASM = memory/vmm.asm
 LINKER = kernel/linker.ld
 
 CC = i686-elf-gcc
@@ -21,8 +23,10 @@ build: $(BOOT_FILE) $(KERNEL_FILE)
 	$(CC) -m32 -ffreestanding -c $(TIMER_FILE_C) -o timer.o
 	$(CC) -m32 -ffreestanding -c $(kb_file_c) -o kb.o
 	$(CC) -m32 -ffreestanding -c $(PMM_FILE_C) -o pmm.o
+	$(CC) -m32 -ffreestanding -c $(VMM_FILE_C) -o vmm.o
+	nasm -f elf32 -g -F dwarf $(VMM_FILE_ASM) -o vmma.o
 
-	ld -m elf_i386 -T $(LINKER) kernel.o kernel_main.o vga.o interruptc.o interrupta.o timer.o kb.o pmm.o -o kernel.elf
+	ld -m elf_i386 -T $(LINKER) kernel.o kernel_main.o vga.o interruptc.o interrupta.o timer.o kb.o pmm.o vmm.o vmma.o -o kernel.elf
 
 	objcopy -O binary kernel.elf kernel.bin
 	dd if=bootstrap.o of=kernel.img
