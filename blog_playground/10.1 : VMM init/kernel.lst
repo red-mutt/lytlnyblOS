@@ -1,0 +1,90 @@
+     1                                  global start
+     2                                  global print_string
+     3                                  global enter_protected
+     4                                  global p_mode_main
+     5                                  
+     6                                  ; no org code starts at 0x0900 though
+     7                                  [bits 16]
+     8                                  start:
+     9 00000000 8CC8                        mov ax, cs
+    10 00000002 8ED8                        mov ds, ax
+    11                                  
+    12 00000004 BE[4600]                    mov si, hello_string
+    13 00000007 E80200                      call print_string
+    14                                  
+    15 0000000A EB0C                        jmp enter_protected
+    16                                  
+    17                                  print_string:
+    18 0000000C B40E                        mov ah, 0Eh
+    19                                  
+    20                                  print_char:
+    21 0000000E AC                          lodsb ; sets al = [DS:SI++]
+    22                                  
+    23 0000000F 3C00                        cmp al, 0
+    24 00000011 7404                        je done
+    25                                      
+    26 00000013 CD10                        int 10h
+    27                                  
+    28 00000015 EBF7                        jmp print_char
+    29                                  
+    30                                  done:
+    31 00000017 C3                          ret
+    32                                  
+    33                                  enter_protected:
+    34 00000018 FA                          cli ;disable interrupts
+    35 00000019 0F0116[9200]                lgdt [gdtr] ; load GDT registor with start address of GDT
+    36 0000001E 0F20C0                      mov eax, cr0
+    37 00000021 6683C801                    or eax, 1 ;set protection enable bit in control register 0 (cr0)
+    38 00000025 0F22C0                      mov cr0, eax
+    39                                  
+    40                                      ; perform far jump to selector 08h (offset into GDT, pointing at a 32bit
+    41                                      ; PM code segment descriptor)
+    42                                      ; to load CS with proper PM32 descriptor)
+    43                                  
+    44                                  
+    45                                      CODE_SEG equ gdt_code - gdt_start
+    46 00000028 EA[2F00]0800                jmp CODE_SEG:p_mode_main
+    47 0000002D EBE9                        jmp enter_protected
+    48                                  [bits 32]
+    49                                  p_mode_main:
+    50 0000002F EBFE                        jmp p_mode_main
+    51 00000031 66B81000                    mov ax, 10h
+    52 00000035 8ED8                        mov ds, ax
+    53 00000037 8EC0                        mov es, ax
+    54 00000039 8EE0                        mov fs, ax
+    55 0000003B 8EE8                        mov gs, ax
+    56 0000003D 8ED0                        mov ss, ax
+    57 0000003F BC00900000                  mov esp, 0x9000
+    58                                      ;mov dword [0xB8000], 0x07410741
+    59                                  hang:
+    60 00000044 EBFE                        jmp hang
+    61                                  
+    62 00000046 48656C6C6F20576F72-     hello_string db 'Hello World!, i am lytlnyblOS, running in real mode', 0
+    62 0000004F 6C64212C206920616D-
+    62 00000058 206C79746C6E79626C-
+    62 00000061 4F532C2072756E6E69-
+    62 0000006A 6E6720696E20726561-
+    62 00000073 6C206D6F646500     
+    63                                  
+    64                                  gdt_start:
+    65                                  gdt_null:
+    66 0000007A 0000000000000000            dq 0
+    67                                  gdt_code:
+    68 00000082 FFFF                        dw 0xFFFF ; limit
+    69 00000084 0000                        dw 0x0000 ; base_low
+    70 00000086 00                          db 0x00 ;base_middle
+    71 00000087 9A                          db 0x9A ;access
+    72 00000088 CF                          db 0xCF ;flags + limit high 4 bits
+    73 00000089 00                          db 0x00 ;base_high
+    74                                  gdt_data:
+    75 0000008A FFFF                        dw 0xFFFF
+    76 0000008C 0000                        dw 0x0000
+    77 0000008E 00                          db 0x00
+    78 0000008F 92                          db 0x92
+    79 00000090 CF                          db 0xCF
+    80 00000091 00                          db 0x00
+    81                                  gdt_end:
+    82                                  gdtr:
+    83 00000092 1700                        dw gdt_end - gdt_start - 1 ; set manually for testing
+    84 00000094 [7A000000]                  dd gdt_start
+    85                                  

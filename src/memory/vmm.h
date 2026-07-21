@@ -6,6 +6,7 @@
 #define PAGE_USER (1 << 2)
 
 #include <stdint.h>
+#include "../kernel/interrupts.h"
 
 typedef uint32_t page_directory_t[1024];
 typedef uint32_t page_table_t[1024];
@@ -25,9 +26,12 @@ void map_page(
 void unmap_page(uintptr_t virtual_address);
 uintptr_t get_physical_address(uintptr_t virtual_address);
 
+extern void flush_tlb(void);
+extern void flush_tlb_page(uintptr_t virtual_address);
+
 // Page table management
 
-page_table_t* create_page_table(uint32_t directory_index);
+page_table_t* create_page_table(uint32_t directory_index, uint32_t flags);
 void destroy_page_table(uint32_t directory_index);
 
 
