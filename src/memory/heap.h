@@ -14,14 +14,14 @@ typedef struct heap_header{
 
 void init_heap(void);
 
-void* kmalloc(size_t size);
+void* kmalloc(size_t requested_size);
 void kfree(void* ptr);
 
 void expand_heap(size_t required_size);
 
 // helpers
 
-heap_header_t* find_free_block(size_t size);
+heap_header_t* find_free_block(size_t requested_size);
 
 void split_block(
     heap_header_t* block,
