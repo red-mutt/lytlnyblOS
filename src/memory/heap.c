@@ -3,7 +3,7 @@
 #include "pmm.h"
 
 heap_header_t* heap_start_head;
-extern uintptr_t heap_end;
+uintptr_t heap_end;
 
 void init_heap() {
     void* physical_start = alloc_frame();
