@@ -52,7 +52,7 @@ void map_page(uintptr_t virtual_address, uintptr_t physical_address, uint32_t fl
 
 void unmap_page(uintptr_t virtual_address) {
     uint16_t dir_index = (virtual_address >> 22);
-    uint16_t table_index = (virtual_address >> 12);  
+    uint16_t table_index = (virtual_address >> 12 & 0x3FF); 
 
     uint32_t dir_entry = (*current_directory)[dir_index];
     page_table_t* selected_table = (page_table_t*)(dir_entry & 0xFFFFF000);
@@ -62,7 +62,7 @@ void unmap_page(uintptr_t virtual_address) {
 
 uintptr_t get_physical_address(uintptr_t virtual_address) {
     uint16_t dir_index = (virtual_address >> 22);
-    uint16_t table_index = (virtual_address >> 12);  
+    uint16_t table_index = (virtual_address >> 12 & 0x3FF); 
 
     uint32_t dir_entry = (*current_directory)[dir_index];
     page_table_t* selected_table = (page_table_t*)(dir_entry & 0xFFFFF000);
