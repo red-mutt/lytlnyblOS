@@ -44,6 +44,7 @@ page_table_t* create_page_table(uint32_t directory_index, uint32_t flags);
 // Page fault handling
 void page_fault_handler(registers_t* registers);
 
+page_directory_t* get_current_directory();
 
 
 #endif

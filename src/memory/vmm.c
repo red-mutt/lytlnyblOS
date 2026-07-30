@@ -129,3 +129,7 @@ void page_fault_handler(registers_t* registers) {
         __asm__ volatile("cli; hlt");
     }
 }
+
+page_directory_t* get_current_directory() {
+    return current_directory;
+}
