@@ -46,5 +46,6 @@ void page_fault_handler(registers_t* registers);
 
 page_directory_t* get_current_directory();
 
+extern page_directory_t* kernel_directory;
 
 #endif

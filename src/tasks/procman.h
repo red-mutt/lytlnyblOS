@@ -6,9 +6,10 @@
 
 #include "../kernel/interrupts.h"
 #include "../memory/vmm.h"
+#include "../memory/pmm.h"
 
-#define INITIAL_PID 1;
-#define KERNEL_STACK_SIZE 0x4000;
+#define INITIAL_PID 1
+#define KERNEL_STACK_SIZE 0x4000
 
 typedef enum {
     PROCESS_RUNNING = 0,
@@ -19,6 +20,7 @@ typedef enum {
 } process_states_t;
 
 typedef struct {
+    uint32_t eip;
     uint32_t cs;
     uint32_t eflags;
     uint32_t ds;
@@ -32,23 +34,25 @@ typedef struct {
     uint32_t ecx;
     uint32_t eax;
 
-} process_registers_t;
+} kprocess_registers_t;
 
-typedef struct process_t {
+typedef struct next {
     uint32_t pid;
-    process_registers_t* regs;
+    kprocess_registers_t regs;
     process_states_t state;
-    process_t* next;
+    next* next;
     page_directory_t* page_directory;
     void* kernel_stack;
-} process_t; 
+} kprocess_t; 
 
 void init_procman();
 
-process_t* create_process();
+process_t* create_kprocess(void* task_address);
 
-void destroy_process(process_t* proc);
+void kdestroy_process(process_t* proc);
 
 extern void get_registers(process_registers_t* regs);
+
+process_t* find_process_by_pid(uint32_t pid);
 
 #endif
