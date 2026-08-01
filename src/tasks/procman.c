@@ -15,12 +15,12 @@ void init_procman() {
     kernel_process->state = PROCESS_RUNNING;
     kernel_process->page_directory = get_current_directory();
     
-    kprocess_registers_t kernel_regs;
-    get_registers(&kernel_regs);
+    kprocess_registers_t kernel_regs = {0};
+
     kernel_process->regs = kernel_regs;
     kernel_process->next = NULL;
 
-    kernel_process->kernel_stack = (void *)(0x9000 - KERNEL_STACK_SIZE);
+    kernel_process->stack = (void *)&kernel_stack_bottom;
 
     process_head = kernel_process;
     current_process = kernel_process;
@@ -30,7 +30,7 @@ kprocess_t* create_kprocess(void* task_address) {
     kprocess_t* new_process = kmalloc(sizeof(kprocess_t));
     new_process->pid = next_pid++;
     new_process->state = PROCESS_READY;
-    new_process->kernel_stack = kmalloc(KERNEL_STACK_SIZE);
+    new_process->stack = kmalloc(KERNEL_STACK_SIZE);
     new_process->next = NULL;
     
     new_process->regs.eax = 0;
@@ -42,7 +42,7 @@ kprocess_t* create_kprocess(void* task_address) {
     new_process->regs.ebp = 0;
 
     new_process->regs.eip = (uintptr_t)task_address;
-    new_process->regs.esp = (uint32_t)(new_process->kernel_stack) + KERNEL_STACK_SIZE;
+    new_process->regs.esp = (uint32_t)(new_process->stack) + KERNEL_STACK_SIZE;
     //set these to the gdt_code and gdt_data back in the first ASM file.
     new_process->regs.cs = 0x08;
     new_process->regs.ds = 0x10;
@@ -68,7 +68,7 @@ void destroy_kprocess(kprocess_t *proc) {
     kprocess_t* traversal_process = process_head;
     if (!traversal_process->next && traversal_process->pid == proc->pid) {
         process_head = NULL;
-        kfree(proc->kernel_stack);
+        kfree(proc->stack);
         kfree(proc);
         return;
     }
@@ -89,7 +89,7 @@ void destroy_kprocess(kprocess_t *proc) {
         return;
     }
 
-    kfree(proc->kernel_stack);
+    kfree(proc->stack);
     kfree(proc);
 }
 

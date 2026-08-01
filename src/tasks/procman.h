@@ -11,6 +11,8 @@
 #define INITIAL_PID 1
 #define KERNEL_STACK_SIZE 0x4000
 
+extern uint8_t kernel_stack_bottom;
+
 typedef enum {
     PROCESS_RUNNING = 0,
     PROCESS_READY = 1,
@@ -42,17 +44,15 @@ typedef struct next {
     process_states_t state;
     next* next;
     page_directory_t* page_directory;
-    void* kernel_stack;
+    void* stack;
 } kprocess_t; 
 
 void init_procman();
 
-process_t* create_kprocess(void* task_address);
+kprocess_t* create_kprocess(void* task_address);
 
-void kdestroy_process(process_t* proc);
+void kdestroy_process(kprocess_t* proc);
 
-extern void get_registers(process_registers_t* regs);
-
-process_t* find_process_by_pid(uint32_t pid);
+kprocess_t* find_process_by_pid(uint32_t pid);
 
 #endif

@@ -1,7 +1,5 @@
-;global start
-;global print_string
-;global enter_protected
-;global p_mode_main
+global kernel_stack_bottom
+global kernel_stack_top
 
 ; no org code starts at 0x0900 though
 [bits 16]
@@ -52,7 +50,7 @@ p_mode_main:
     mov fs, ax
     mov gs, ax
     mov ss, ax
-    mov esp, 0x9000
+    mov esp, kernel_stack_top
 
     mov byte [0xB8000], 'P'
     mov byte [0xB8001], 0x02
@@ -89,3 +87,8 @@ gdtr:
     dw gdt_end - gdt_start - 1 ; set manually for testing
     dd gdt_start
 
+section .bss 
+align 16
+kernel_stack_bottom:
+    resb 0x4000
+kernel_stack_top:
