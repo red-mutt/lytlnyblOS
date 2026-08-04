@@ -34,10 +34,14 @@
 #define PIT_BCD               0x01
 
 #include <stdint.h>
+#include <stdbool.h>
+#include "interrupts.h"
+#include "../tasks/context.h"
+#include "../tasks/procman.h"
 
 void timer_init(uint32_t frequency);
 
-void timer_handler(void);
+void timer_handler(registers_t* regs);
 
 uint64_t timer_get_ticks(void);
 

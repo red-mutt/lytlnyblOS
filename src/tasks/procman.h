@@ -36,7 +36,7 @@ typedef struct {
     uint32_t ecx;
     uint32_t eax;
 
-} kprocess_registers_t;
+} __attribute__((packed)) kprocess_registers_t;
 
 typedef struct kprocess {
     uint32_t pid;
@@ -45,7 +45,7 @@ typedef struct kprocess {
     struct kprocess* next;
     page_directory_t* page_directory;
     void* stack;
-} kprocess_t; 
+} __attribute__((packed)) kprocess_t; 
 
 void init_procman();
 
@@ -54,5 +54,7 @@ kprocess_t* create_kprocess(void* task_address);
 void destroy_kprocess(kprocess_t* proc);
 
 kprocess_t* find_process_by_pid(uint32_t pid);
+
+extern kprocess_t* current_process;
 
 #endif

@@ -87,7 +87,7 @@ void isr_handler(registers_t* regs) {
 void irq_handler(registers_t* regs) {
     switch (regs->interrupt_number - 32) {
         case 0:
-            timer_handler();
+            timer_handler(regs);
             break;
         case 1:
             keyboard_handler();

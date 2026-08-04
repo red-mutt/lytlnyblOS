@@ -5,6 +5,11 @@
 volatile uint32_t ticks = 0;
 static uint32_t freq;
 
+//context switcher stuff
+volatile bool context_switch_requested = false;
+volatile uint32_t old_process_pid;
+volatile uint32_t new_process_pid;
+
 extern vga_text terminal;
 
 void timer_init(uint32_t frequency) {
@@ -22,10 +27,14 @@ void timer_init(uint32_t frequency) {
     io_wait();
 }
 
-void timer_handler() {
+void timer_handler(registers_t* regs) {
     ticks++;
     if ((ticks % 100) == 0) {
         //vga_text_writeline(&terminal, " 1 second ");
+    }
+
+    if (context_switch_requested) {
+        context_switch(find_process_by_pid(old_process_pid), find_process_by_pid(new_process_pid), regs);
     }
 }
 
