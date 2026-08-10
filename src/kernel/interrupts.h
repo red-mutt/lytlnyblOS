@@ -60,6 +60,9 @@ typedef struct {
     uint32_t eip;
     uint32_t cs;
     uint32_t eflags;
+
+    uint32_t user_esp;
+    uint32_t ss;
 } __attribute__((packed)) registers_t;
 
 #define IDT_ENTRIES 256

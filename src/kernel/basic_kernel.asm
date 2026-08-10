@@ -1,6 +1,9 @@
 global kernel_stack_bottom
 global kernel_stack_top
 
+global tss
+global tss_end
+
 ; no org code starts at 0x0900 though
 [bits 16]
 start:
@@ -82,10 +85,35 @@ gdt_data:
     db 0x92
     db 0xCF
     db 0x00
+gdt_user_code:
+    dw 0xFFFF
+    dw 0x0000
+    db 0x00
+    db 0xFA
+    db 0xCF
+    db 0x00
+gdt_user_data:
+    dw 0xFFFF
+    dw 0x0000
+    db 0x00
+    db 0xF2
+    db 0xCF
+    db 0x00
+gdt_tss:
+    dw tss_end - tss - 1
+    dw tss 
+    db tss >> 16
+    db 0x89
+    db 0 
+    db tss >> 24
 gdt_end:
 gdtr:
-    dw gdt_end - gdt_start - 1 ; set manually for testing
+    dw gdt_end - gdt_start - 1 
     dd gdt_start
+
+tss:
+    times 104 db 0
+tss_end:
 
 section .bss 
 align 16

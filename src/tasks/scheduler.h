@@ -7,8 +7,6 @@
 
 #define DEFAULT_TIME_SLICE 10
 
-void init_scheduler();
-
 kprocess_t* get_next_process();
 
 void schedule(registers_t* regs);

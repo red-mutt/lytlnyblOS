@@ -11,8 +11,13 @@ VMM_FILE_C = memory/vmm.c
 VMM_FILE_ASM = memory/vmm.asm
 HEAP_FILE_C = memory/heap.c
 TASKS_FILE_C = tasks/procman.c
+TASKS_FILE_ASM = tasks/procman.asm
 CONTEXT_FILE_C = tasks/context.c
 SCHEDULER_FILE_C = tasks/scheduler.c
+
+USER_TEST_FILE_C = user/test.c
+USER_LINKER = user/linker.ld
+
 LINKER = kernel/linker.ld
 
 CC = i686-elf-gcc
@@ -33,15 +38,22 @@ build: $(BOOT_FILE) $(KERNEL_FILE)
 	$(CC) -m32 -ffreestanding -c $(TASKS_FILE_C) -o tasks.o
 	$(CC) -m32 -ffreestanding -c $(CONTEXT_FILE_C) -o context.o
 	$(CC) -m32 -ffreestanding -c $(SCHEDULER_FILE_C) -o scheduler.o
+	nasm -f elf32 -g -F dwarf $(TASKS_FILE_ASM) -o tasksa.o
 
-	ld -m elf_i386 -T $(LINKER) kernel.o kernel_main.o vga.o interruptc.o interrupta.o timer.o kb.o pmm.o vmm.o vmma.o heap.o tasks.o context.o scheduler.o -o kernel.elf
+	#user tests
+	$(CC) -m32 ffreestanding -fno-pie -fno-pic -c $(USER_TEST_FILE_C) -o user_test.o
+	ld -m elf_i386 -T $(USER_LINKER) user_test.o -o user_test.elf
+	objcopy -O binary user_test.elf user_test.bin
+	objcopy -I binary -O elf32-i386 -B i386 user_test.bin user_test binary.o
+
+
+
+	ld -m elf_i386 -T $(LINKER) kernel.o kernel_main.o vga.o interruptc.o interrupta.o timer.o kb.o pmm.o vmm.o vmma.o heap.o tasks.o context.o scheduler.o tasksa.o user_test_binary.o -o kernel.elf
 
 	objcopy -O binary kernel.elf kernel.bin
 	dd if=bootstrap.o of=kernel.img
 	dd if=kernel.bin of=kernel.img seek=1 conv=notrunc
 	qemu-system-i386 -drive format=raw,file=kernel.img 
-            
-.PHONY: clean
 
 clean:
 	rm -f *.o
@@ -49,3 +61,4 @@ clean:
 	rm -f *.elf
 	rm -f *.lst
 	rm -f *.debug
+	
