@@ -3,8 +3,8 @@
 volatile uint32_t scheduler_tick_count = 0;
 uint32_t time_slice = DEFAULT_TIME_SLICE;
 
-kprocess_t* get_next_process() {
-    kprocess_t* traversal_process = current_process;
+process_t* get_next_process() {
+    process_t* traversal_process = current_process;
     do {
         if (traversal_process->state == PROCESS_READY) {
             return traversal_process;
@@ -24,7 +24,7 @@ void schedule(registers_t* regs) {
     scheduler_tick_count++;
     if (scheduler_tick_count >= time_slice) { 
         scheduler_tick_count = 0;
-        kprocess_t* next_process = get_next_process();
+        process_t* next_process = get_next_process();
         if (next_process != current_process) {
             context_switch(current_process, next_process, regs);
         }

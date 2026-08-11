@@ -16,7 +16,7 @@ CONTEXT_FILE_C = tasks/context.c
 SCHEDULER_FILE_C = tasks/scheduler.c
 
 USER_TEST_FILE_C = user/test.c
-USER_LINKER = user/linker.ld
+USER_LINKER = user/user.ld
 
 LINKER = kernel/linker.ld
 
@@ -41,10 +41,10 @@ build: $(BOOT_FILE) $(KERNEL_FILE)
 	nasm -f elf32 -g -F dwarf $(TASKS_FILE_ASM) -o tasksa.o
 
 	#user tests
-	$(CC) -m32 ffreestanding -fno-pie -fno-pic -c $(USER_TEST_FILE_C) -o user_test.o
+	$(CC) -m32 -ffreestanding -fno-pie -fno-pic -c $(USER_TEST_FILE_C) -o user_test.o
 	ld -m elf_i386 -T $(USER_LINKER) user_test.o -o user_test.elf
 	objcopy -O binary user_test.elf user_test.bin
-	objcopy -I binary -O elf32-i386 -B i386 user_test.bin user_test binary.o
+	objcopy -I binary -O elf32-i386 -B i386 user_test.bin user_test_binary.o
 
 
 

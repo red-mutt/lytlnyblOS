@@ -163,15 +163,28 @@ process_t* find_process_by_pid(uint32_t pid) {
     return NULL;
 }
 
-tss_t *tss_ptr = (tss_t*)tss;
-uint32_t tss_size = sizeof(*tss_ptr);
+tss_t tss;
 
 void init_tss(void) {
-    memset(&tss, 0, sizeof(*tss_ptr));
+    uintptr_t base = (uintptr_t)&tss;
+    uint32_t limit = sizeof(tss_t) - 1;
+    gdt_tss[0] = limit & 0xFF;
+    gdt_tss[1] = (limit >> 8) & 0xFF;
 
-    tss_ptr->ss0 = 0x10;
-    tss_ptr->esp0 = 0;
+    gdt_tss[2] = base & 0xFF;
+    gdt_tss[3] = (base >> 8) & 0xFF;
 
-    tss_ptr->iomap_base = sizeof(*tss_ptr);
+    gdt_tss[4] = (base >> 16) & 0xFF;
+    gdt_tss[5] = 0x89;
+
+    gdt_tss[6] = (limit >> 16) & 0x0F;
+    gdt_tss[7] = (limit >> 24) & 0xFF;
+
+    memset(&tss, 0, sizeof(tss_t));
+
+    tss.ss0 = 0x10;
+    tss.esp0 = 0;
+
+    tss.iomap_base = sizeof(tss_t);
     load_tss();
 }

@@ -1,4 +1,6 @@
 #include "context.h"
+#include "../kernel/vga_text.h"
+extern vga_text* terminal;
 
 void save_context(process_t* process, registers_t* regs) {
     process->regs.ss = regs->ss;
@@ -41,7 +43,7 @@ void context_switch(process_t* old_process, process_t* new_process, registers_t*
     save_context(old_process, regs);
 
     if (new_process->type == PROCESS_USER) {  
-        tss_ptr->esp0 = (uintptr_t)(new_process->kstack) + KERNEL_STACK_SIZE;
+        tss.esp0 = (uintptr_t)(new_process->kstack) + KERNEL_STACK_SIZE;
         set_cr3((uintptr_t)new_process->page_directory);
     } else if (new_process->type == PROCESS_KERNEL) {
         set_cr3((uintptr_t)kernel_directory);

@@ -1,5 +1,6 @@
 global kernel_stack_bottom
 global kernel_stack_top
+global gdt_tss
 
 global tss
 global tss_end
@@ -99,21 +100,17 @@ gdt_user_data:
     db 0xF2
     db 0xCF
     db 0x00
-gdt_tss:
-    dw tss_end - tss - 1
-    dw tss 
-    db tss >> 16
-    db 0x89
-    db 0 
-    db tss >> 24
+gdt_tss: ; will be populated in C later
+    dw 0
+    dw 0
+    db 0
+    db 0
+    db 0
+    db 0
 gdt_end:
 gdtr:
     dw gdt_end - gdt_start - 1 
     dd gdt_start
-
-tss:
-    times 104 db 0
-tss_end:
 
 section .bss 
 align 16

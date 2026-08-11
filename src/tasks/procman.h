@@ -66,6 +66,7 @@ typedef struct process {
 void init_procman();
 
 process_t* create_kprocess(void* task_address);
+process_t* create_uprocess(void* task_address);
 
 void destroy_kprocess(process_t* proc);
 
@@ -113,9 +114,8 @@ typedef struct {
     uint16_t iomap_base;
 } __attribute__((packed)) tss_t;
 
-extern uint8_t tss[];
-extern uint8_t tss_end[];
-extern tss_t* tss_ptr;
+extern tss_t tss;
+extern uint8_t gdt_tss[];
 
 void init_tss(void);
 void set_kernel_stack(uintptr_t stack);

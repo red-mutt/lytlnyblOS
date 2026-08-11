@@ -37,6 +37,7 @@ void kernel_main(void)
 
     timer_init(100);
     keyboard_init();
+    init_tss();
 
     uint32_t* numbers = (uint32_t*)kmalloc(5 * sizeof(uint32_t));
 
@@ -57,17 +58,8 @@ void kernel_main(void)
     timer_wait_ms(10);
 
     vga_text_writeline(&terminal, "back in main");
-
+    
     //userspace testing
-    extern unsigned char _binary_user_test_bin_start[];
-    extern unsigned char _binary_user_test_bin_end[];
-
-    uint32_t user_test_size = 
-        _binary_user_test_bin_end - _binary_user_test_bin_start;
-
-    process_t* user_proc = create_uprocess((void*)0x400000);
-
-    set_cr3((uintptr_t)user_proc->page_directory);
 
     //map vga so ring 3 can access
     map_page(
@@ -78,11 +70,15 @@ void kernel_main(void)
 
     void* code_frame = alloc_frame();
 
+    //create temporary virtual address to access code frame
     map_page(
-        0x00400000,
+        USER_COPY_VIRT,
         (uintptr_t)code_frame,
-        PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER
+        PAGE_PRESENT | PAGE_WRITABLE
     );
+
+    extern unsigned char _binary_user_test_bin_start[];
+    extern unsigned char _binary_user_test_bin_end[];
 
     //copy user program to physical frame
     uintptr_t user_size = (uintptr_t)(_binary_user_test_bin_end - 
@@ -91,6 +87,17 @@ void kernel_main(void)
     for (uintptr_t i = 0; i < user_size; i++) {
         ((uint8_t*)USER_COPY_VIRT)[i] = _binary_user_test_bin_start[i];
     }
+
+    process_t* user_proc = create_uprocess((void*)USER_COPY_VIRT);
+
+    set_cr3((uintptr_t)user_proc->page_directory);
+    
+    map_page(
+        0x400000, 
+        (uintptr_t)code_frame, 
+        PAGE_PRESENT | PAGE_USER
+    );
+
 
 
     for (;;);
