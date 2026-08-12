@@ -25,19 +25,19 @@ CC = i686-elf-gcc
 build: $(BOOT_FILE) $(KERNEL_FILE)
 	nasm -f bin $(BOOT_FILE) -o bootstrap.o
 	nasm -f elf32 -g -F dwarf $(KERNEL_FILE) -o kernel.o
-	$(CC) -m32 -ffreestanding -c $(KERNEL_FILES_C) -o kernel_main.o
-	$(CC) -m32 -ffreestanding -c $(VGA_FILE_C) -o vga.o
-	$(CC) -m32 -ffreestanding -c $(INTERRUPT_FILE_C) -o interruptc.o
+	$(CC) -g -m32 -ffreestanding -c $(KERNEL_FILES_C) -o kernel_main.o
+	$(CC) -g -m32 -ffreestanding -c $(VGA_FILE_C) -o vga.o
+	$(CC) -g -m32 -ffreestanding -c $(INTERRUPT_FILE_C) -o interruptc.o
 	nasm -f elf32 -g -F dwarf $(INTERRUPT_FILE_ASM) -o interrupta.o
-	$(CC) -m32 -ffreestanding -c $(TIMER_FILE_C) -o timer.o
-	$(CC) -m32 -ffreestanding -c $(kb_file_c) -o kb.o
-	$(CC) -m32 -ffreestanding -c $(PMM_FILE_C) -o pmm.o
-	$(CC) -m32 -ffreestanding -c $(VMM_FILE_C) -o vmm.o
+	$(CC) -g -m32 -ffreestanding -c $(TIMER_FILE_C) -o timer.o
+	$(CC) -g -m32 -ffreestanding -c $(kb_file_c) -o kb.o
+	$(CC) -g -m32 -ffreestanding -c $(PMM_FILE_C) -o pmm.o
+	$(CC) -g -m32 -ffreestanding -c $(VMM_FILE_C) -o vmm.o
 	nasm -f elf32 -g -F dwarf $(VMM_FILE_ASM) -o vmma.o
-	$(CC) -m32 -ffreestanding -c $(HEAP_FILE_C) -o heap.o
-	$(CC) -m32 -ffreestanding -c $(TASKS_FILE_C) -o tasks.o
-	$(CC) -m32 -ffreestanding -c $(CONTEXT_FILE_C) -o context.o
-	$(CC) -m32 -ffreestanding -c $(SCHEDULER_FILE_C) -o scheduler.o
+	$(CC) -g -m32 -ffreestanding -c $(HEAP_FILE_C) -o heap.o
+	$(CC) -g -m32 -ffreestanding -c $(TASKS_FILE_C) -o tasks.o
+	$(CC) -g -m32 -ffreestanding -c $(CONTEXT_FILE_C) -o context.o
+	$(CC) -g -m32 -ffreestanding -c $(SCHEDULER_FILE_C) -o scheduler.o
 	nasm -f elf32 -g -F dwarf $(TASKS_FILE_ASM) -o tasksa.o
 
 	#user tests
@@ -53,7 +53,7 @@ build: $(BOOT_FILE) $(KERNEL_FILE)
 	objcopy -O binary kernel.elf kernel.bin
 	dd if=bootstrap.o of=kernel.img
 	dd if=kernel.bin of=kernel.img seek=1 conv=notrunc
-	qemu-system-i386 -drive format=raw,file=kernel.img 
+	qemu-system-i386 -drive format=raw,file=kernel.img -s -S
 
 clean:
 	rm -f *.o

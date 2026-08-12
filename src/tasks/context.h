@@ -13,4 +13,6 @@ void save_context(process_t* process, registers_t* regs);
 
 void load_context(process_t* process, registers_t* regs);
 
+extern volatile bool return_to_user;
+
 #endif

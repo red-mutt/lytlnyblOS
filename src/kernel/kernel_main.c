@@ -98,6 +98,8 @@ void kernel_main(void)
         PAGE_PRESENT | PAGE_USER
     );
 
+    user_proc->regs.eip = (0x00400000);
+
 
 
     for (;;);

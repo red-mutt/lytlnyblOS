@@ -1,9 +1,9 @@
 #include "context.h"
 #include "../kernel/vga_text.h"
 extern vga_text* terminal;
+volatile bool return_to_user;
 
 void save_context(process_t* process, registers_t* regs) {
-    process->regs.ss = regs->ss;
     process->regs.eip = regs->eip;
     process->regs.cs = regs->cs;
     process->regs.eflags = regs->eflags;
@@ -12,15 +12,20 @@ void save_context(process_t* process, registers_t* regs) {
     process->regs.edi = regs->edi;
     process->regs.esi = regs->esi;
     process->regs.ebp = regs->ebp;
-    process->regs.esp = regs->esp;
     process->regs.ebx = regs->ebx;
     process->regs.edx = regs->edx;
     process->regs.ecx = regs->ecx;
     process->regs.eax = regs->eax;
+    
+    if (process->type == PROCESS_KERNEL) {
+        process->regs.esp = regs->esp;
+    } else {
+        process->regs.esp = regs->user_esp;
+        process->regs.ss = regs->ss;
+    }
 }
 
 void load_context(process_t* process, registers_t* regs) {
-    regs->ss = process->regs.ss;
     regs->eip = process->regs.eip;
     regs->cs = process->regs.cs;
     regs->eflags = process->regs.eflags;
@@ -29,11 +34,17 @@ void load_context(process_t* process, registers_t* regs) {
     regs->edi = process->regs.edi;
     regs->esi = process->regs.esi;
     regs->ebp = process->regs.ebp;
-    regs->esp = process->regs.esp;
     regs->ebx = process->regs.ebx;
     regs->edx = process->regs.edx;
     regs->ecx = process->regs.ecx;
     regs->eax = process->regs.eax;
+
+    if (process->type == PROCESS_KERNEL) {
+        regs->esp = process->regs.esp;
+    } else {
+        regs->user_esp = process->regs.esp;
+        regs->ss = process->regs.ss;
+    }
 }
 
 void context_switch(process_t* old_process, process_t* new_process, registers_t* regs) {
@@ -41,6 +52,8 @@ void context_switch(process_t* old_process, process_t* new_process, registers_t*
     old_process->state = PROCESS_READY;
     new_process->state = PROCESS_RUNNING;
     save_context(old_process, regs);
+
+    return_to_user = (new_process->type == PROCESS_USER);
 
     if (new_process->type == PROCESS_USER) {  
         tss.esp0 = (uintptr_t)(new_process->kstack) + KERNEL_STACK_SIZE;
