@@ -92,11 +92,9 @@ process_t* create_uprocess(void* task_address) {
     new_process->page_directory = (page_directory_t*)alloc_frame();
     memset((page_directory_t*)new_process->page_directory, 0, 4096);
 
-    /*
     for (uint32_t i = 0; i < 1024; i++) {
-        (*((page_directory_t*)new_process->page_directory))[i] = (*kernel_directory)[i] | PAGE_USER;
+        (*new_process->page_directory)[i] = (*kernel_directory)[i];
     }
-    */
 
     uintptr_t ustack_frame = (uintptr_t)alloc_frame();
 

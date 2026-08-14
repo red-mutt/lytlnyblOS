@@ -53,7 +53,7 @@ build: $(BOOT_FILE) $(KERNEL_FILE)
 	objcopy -O binary kernel.elf kernel.bin
 	dd if=bootstrap.o of=kernel.img
 	dd if=kernel.bin of=kernel.img seek=1 conv=notrunc
-	qemu-system-i386 -drive format=raw,file=kernel.img -s -S
+	qemu-system-i386 -drive format=raw,file=kernel.img #-s -S
 
 clean:
 	rm -f *.o

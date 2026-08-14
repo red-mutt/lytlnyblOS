@@ -75,11 +75,11 @@ void kernel_main(void)
     }
 
     //context switch is never called a third time, what?
-    process_t* user_proc = create_uprocess((void*)0x00400000);
+    process_t* user_proc = create_uprocess((void*)0x00A00000);
 
     map_page(
         user_proc->page_directory,
-        0x00400000, 
+        0x00A00000, 
         (uintptr_t)code_frame, 
         PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER
     );
