@@ -7,7 +7,7 @@ uintptr_t heap_end;
 
 void init_heap() {
     void* physical_start = alloc_frame();
-    map_page(HEAP_START, (uintptr_t)physical_start, PAGE_PRESENT | PAGE_WRITABLE);
+    map_page(kernel_directory, HEAP_START, (uintptr_t)physical_start, PAGE_PRESENT | PAGE_WRITABLE);
     heap_header_t* first_header = (heap_header_t*)HEAP_START;
 
     first_header->size = 4096 - sizeof(heap_header_t); //4096 is page size 
@@ -54,7 +54,7 @@ void expand_heap(size_t required_size) {
     uint32_t required_pages = (required_size + 4096 - 1) / 4096;
     for (size_t i = 0; i < required_pages; i++) {
         void* new_page_physical_start = alloc_frame();
-        map_page(heap_end, (uintptr_t)new_page_physical_start, PAGE_PRESENT | PAGE_WRITABLE);
+        map_page(kernel_directory, heap_end, (uintptr_t)new_page_physical_start, PAGE_PRESENT | PAGE_WRITABLE);
 
         heap_header_t* traversal_head = heap_start_head;
         while (traversal_head) {

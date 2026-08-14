@@ -61,21 +61,7 @@ void kernel_main(void)
     
     //userspace testing
 
-    //map vga so ring 3 can access
-    map_page(
-    0xB8000,
-    0xB8000,
-    PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER
-    );
-
     void* code_frame = alloc_frame();
-
-    //create temporary virtual address to access code frame
-    map_page(
-        USER_COPY_VIRT,
-        (uintptr_t)code_frame,
-        PAGE_PRESENT | PAGE_WRITABLE
-    );
 
     extern unsigned char _binary_user_test_bin_start[];
     extern unsigned char _binary_user_test_bin_end[];
@@ -85,22 +71,26 @@ void kernel_main(void)
             _binary_user_test_bin_start);
 
     for (uintptr_t i = 0; i < user_size; i++) {
-        ((uint8_t*)USER_COPY_VIRT)[i] = _binary_user_test_bin_start[i];
+        ((uint8_t*)code_frame)[i] = _binary_user_test_bin_start[i];
     }
 
-    process_t* user_proc = create_uprocess((void*)USER_COPY_VIRT);
+    //context switch is never called a third time, what?
+    process_t* user_proc = create_uprocess((void*)0x00400000);
 
-    set_cr3((uintptr_t)user_proc->page_directory);
-    
     map_page(
-        0x400000, 
+        user_proc->page_directory,
+        0x00400000, 
         (uintptr_t)code_frame, 
-        PAGE_PRESENT | PAGE_USER
+        PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER
     );
 
-    user_proc->regs.eip = (0x00400000);
-
-
+    //map vga so process ring 3 can access
+    map_page(
+        user_proc->page_directory,
+        0xB8000,
+        0xB8000,
+        PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER
+    );
 
     for (;;);
 }

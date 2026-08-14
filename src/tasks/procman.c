@@ -90,23 +90,24 @@ process_t* create_uprocess(void* task_address) {
     new_process->regs.eflags = 0x202;
 
     new_process->page_directory = (page_directory_t*)alloc_frame();
-    //need to map new page directory to a page in the kernel directory so that we can use a 
-    //virtual address to edit data
-    map_page(NEW_PAGE_DIR_VIRT, 
-            (uintptr_t)new_process->page_directory, 
-            PAGE_PRESENT | PAGE_WRITABLE);
-    memset((page_directory_t*)NEW_PAGE_DIR_VIRT, 0, 4096);
+    memset((page_directory_t*)new_process->page_directory, 0, 4096);
 
+    /*
     for (uint32_t i = 0; i < 1024; i++) {
-        (*((page_directory_t*)NEW_PAGE_DIR_VIRT))[i] = (*kernel_directory)[i];
+        (*((page_directory_t*)new_process->page_directory))[i] = (*kernel_directory)[i] | PAGE_USER;
     }
+    */
 
-    set_cr3((uintptr_t)new_process->page_directory);
     uintptr_t ustack_frame = (uintptr_t)alloc_frame();
-    map_page(USER_STACK_TOP - 4096, ustack_frame, PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER);
-    new_process->ustack = (void*)(USER_STACK_TOP - 4096);
 
-    set_cr3((uintptr_t)kernel_directory);
+    map_page(new_process->page_directory, 
+            USER_STACK_TOP - 4096,
+            ustack_frame,
+            PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER
+    );
+
+
+    new_process->ustack = (void*)(USER_STACK_TOP - 4096);
 
     process_t* traversal_process = process_head;
     while (traversal_process) {
