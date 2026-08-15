@@ -87,7 +87,7 @@ void kernel_main(void)
     //map vga so process ring 3 can access
     map_page(
         user_proc->page_directory,
-        0xB8000,
+        0x00B00000,
         0xB8000,
         PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER
     );
