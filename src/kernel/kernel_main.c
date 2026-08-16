@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 vga_text terminal;
-#define USER_COPY_VIRT 0xC0000000
+#include "../kernel/mappings.h"
 
 void test_process() {
     vga_text_writeline(&terminal, "PROCESS RUNNING");
@@ -54,7 +54,7 @@ void kernel_main(void)
 
     kfree(numbers);
 
-    process_t* test_proc= create_kprocess(test_process);
+    process_t* test_proc= create_process(test_process, PROCESS_KERNEL);
     timer_wait_ms(10);
 
     vga_text_writeline(&terminal, "back in main");
@@ -75,11 +75,11 @@ void kernel_main(void)
     }
 
     //context switch is never called a third time, what?
-    process_t* user_proc = create_uprocess((void*)0x00A00000);
+    process_t* user_proc = create_process((void*)USER_CODE_BASE, PROCESS_USER);
 
     map_page(
         user_proc->page_directory,
-        0x00A00000, 
+        USER_CODE_BASE, 
         (uintptr_t)code_frame, 
         PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER
     );
@@ -87,7 +87,7 @@ void kernel_main(void)
     //map vga so process ring 3 can access
     map_page(
         user_proc->page_directory,
-        0x00B00000,
+        USER_VGA,
         0xB8000,
         PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER
     );

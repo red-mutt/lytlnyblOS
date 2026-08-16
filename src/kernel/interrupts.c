@@ -81,6 +81,13 @@ void isr_handler(registers_t* regs) {
             break;
     }
 
+    if ((regs->cs & 3) == 3) {
+        current_process->state = PROCESS_TERMINATED;
+        context_switch(current_process, get_next_process(), regs);
+        return;
+    }
+
+
     for (;;);
 }
 

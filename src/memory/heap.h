@@ -1,11 +1,11 @@
 #ifndef HEAP_H
 #define HEAP_H
 
-#define HEAP_START 0x00400000 //dir index 1, eveyrthing else 0
 
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include "../kernel/mappings.h"
 
 typedef struct heap_header{
     size_t size;

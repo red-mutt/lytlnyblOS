@@ -7,6 +7,8 @@ extern vga_text terminal;
 page_directory_t* kernel_directory;
 page_directory_t* current_directory;
 
+#include "../tasks/procman.h"
+#include "../tasks/scheduler.h"
 
 void init_vmm() {
     kernel_directory = alloc_frame();
@@ -53,30 +55,21 @@ void map_page(page_directory_t* directory, uintptr_t virtual_address, uintptr_t 
     }
 }
 
-
-uintptr_t phys_to_virt(uintptr_t physical_address) {
-    return PHYS_MAP_BASE + physical_address;
-}
-
-uintptr_t virt_to_phys(uintptr_t virtual_address) {
-    return virtual_address - PHYS_MAP_BASE;
-}
-
-void unmap_page(uintptr_t virtual_address) {
+void unmap_page(page_directory_t* directory, uintptr_t virtual_address) {
     uint16_t dir_index = (virtual_address >> 22);
     uint16_t table_index = (virtual_address >> 12 & 0x3FF); 
 
-    uint32_t dir_entry = (*current_directory)[dir_index];
+    uint32_t dir_entry = (*directory)[dir_index];
     page_table_t* selected_table = (page_table_t*)(dir_entry & 0xFFFFF000);
     (*selected_table)[table_index] &= ~(PAGE_PRESENT);
     flush_tlb_page(virtual_address);
 }
 
-uintptr_t get_physical_address(uintptr_t virtual_address) {
+uintptr_t get_physical_address(page_directory_t* directory, uintptr_t virtual_address) {
     uint16_t dir_index = (virtual_address >> 22);
     uint16_t table_index = (virtual_address >> 12 & 0x3FF); 
 
-    uint32_t dir_entry = (*current_directory)[dir_index];
+    uint32_t dir_entry = (*directory)[dir_index];
     page_table_t* selected_table = (page_table_t*)(dir_entry & 0xFFFFF000);
     return (*selected_table)[table_index];
 }
@@ -137,12 +130,6 @@ void page_fault_handler(registers_t* registers) {
     vga_text_writeline(&terminal, "");
 
 
-    // Stop execution
-    while (1) {
-        __asm__ volatile("cli; hlt");
-    }
+
 }
 
-page_directory_t* get_current_directory() {
-    return current_directory;
-}

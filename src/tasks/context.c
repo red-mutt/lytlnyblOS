@@ -1,6 +1,4 @@
 #include "context.h"
-#include "../kernel/vga_text.h"
-extern vga_text* terminal;
 volatile bool return_to_user;
 
 void save_context(process_t* process, registers_t* regs) {
@@ -49,7 +47,11 @@ void load_context(process_t* process, registers_t* regs) {
 
 void context_switch(process_t* old_process, process_t* new_process, registers_t* regs) {
     current_process = new_process;
-    old_process->state = PROCESS_READY;
+    if (old_process->state == PROCESS_RUNNING) {
+        old_process->state = PROCESS_READY;
+    } else if (old_process->state == PROCESS_TERMINATED) {
+        destroy_process(old_process);    
+    }
     new_process->state = PROCESS_RUNNING;
     save_context(old_process, regs);
 

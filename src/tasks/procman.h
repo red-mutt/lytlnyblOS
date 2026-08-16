@@ -65,10 +65,11 @@ typedef struct process {
 
 void init_procman();
 
-process_t* create_kprocess(void* task_address);
-process_t* create_uprocess(void* task_address);
+process_t* create_process(void* task_address, process_type_t type);
+void create_kprocess(process_t* new_process);
+void create_uprocess(process_t* new_process);
 
-void destroy_kprocess(process_t* proc);
+void destroy_process(process_t* proc);
 
 process_t* find_process_by_pid(uint32_t pid);
 
