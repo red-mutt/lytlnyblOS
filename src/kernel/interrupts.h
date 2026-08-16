@@ -26,6 +26,15 @@
 
 #define PIC_EOI		0x20		/* End-of-interrupt command code */
 
+// SYSCALL DEFS
+#define SYSCALL_EXIT 0x01
+#define SYSCALL_GETPID 0x02
+#define SYSCALL_YIELD 0x03
+#define SYSCALL_SLEEP 0x04
+#define SYSCALL_WRITE 0x05
+#define SYSCALL_SBRK 0x06
+
+
 
 #include <stdint.h>
 typedef struct {
@@ -78,6 +87,7 @@ void idt_set_gate(
 
 void isr_handler(registers_t* regs);
 void irq_handler(registers_t* regs);
+void syscall_handler(registers_t* regs);
 
 void pic_remap(int offset1, int offset2);
 
@@ -140,6 +150,8 @@ extern void isr30(void);
 extern void isr31(void);
 
 void memset(void* ptr, uint8_t val, uint32_t size);
+
+extern void syscall_entry(void);
 
 
 #endif

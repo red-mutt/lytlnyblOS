@@ -29,6 +29,7 @@ void init_procman() {
 process_t* create_process(void* task_address, process_type_t type) {
     process_t* new_process = kmalloc(sizeof(process_t));
 
+    new_process->wake_tick = 0;
     new_process->type = type;
     new_process->pid = next_pid++;
     new_process->state = PROCESS_READY;

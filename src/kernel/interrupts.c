@@ -105,6 +105,47 @@ void irq_handler(registers_t* regs) {
     pic_send_eoi(regs->interrupt_number - 32);
 }
 
+void syscall_handler(registers_t* regs) {
+    switch (regs->eax) {
+        case SYSCALL_EXIT:
+            current_process->state = PROCESS_TERMINATED;
+            context_switch(current_process, get_next_process(), regs);
+            break;
+        case SYSCALL_GETPID:
+            regs->eax = current_process->pid;
+            break;
+        case SYSCALL_YIELD:
+            context_switch(current_process, get_next_process(), regs);
+            break;
+        case SYSCALL_SLEEP:
+            current_process->wake_tick = timer_get_ticks() + regs->ebx;
+            current_process->state = PROCESS_SLEEPING;
+            context_switch(current_process, get_next_process(), regs);
+            break;
+        case SYSCALL_WRITE:
+            // a rather mock version of write syscall, only used for output to the terminal, will advance more later
+            int fd = regs->ebx;
+            uint32_t buffer = regs->ecx;
+            size_t count = regs->edx;
+
+            
+            if (fd != 1) {
+                regs->eax = -1;
+                break;
+            }
+
+            ((char*) buffer)[count] = '\0';
+            vga_text_write(&terminal, (char*)buffer);
+            
+            regs->eax = (int)count;
+            break;
+        default:
+            vga_text_writeline(&terminal, "syscall not found");
+            break;
+    }
+    return;
+}
+
 void idt_init(void) {
     memset(idt, 0, sizeof(idt));
 
@@ -160,6 +201,9 @@ void idt_init(void) {
     idt_set_gate(45, (uint32_t)irq13, 0x08, 0x8E);
     idt_set_gate(46, (uint32_t)irq14, 0x08, 0x8E);
     idt_set_gate(47, (uint32_t)irq15, 0x08, 0x8E);
+    
+    //software interrupts
+    idt_set_gate(0x80, (uint32_t)syscall_entry, 0x08, 0xEE);
 
 
     idt_load(&idtr);

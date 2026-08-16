@@ -2,12 +2,14 @@
 
 extern isr_handler
 extern irq_handler
+extern syscall_handler
 
 global idt_load
 global isr0
 global outb
 global inb
 global io_wait
+global syscall_entry
 
 idt_load:
     mov eax, [esp + 4]
@@ -190,4 +192,26 @@ IRQ 12, 44
 IRQ 13, 45
 IRQ 14, 46
 IRQ 15, 47
+
+syscall_entry:
+    push dword 0x80
+    push dword 0
+
+    pusha 
+    
+    mov ax, ds
+    push eax
+
+    push esp
+
+    call syscall_handler
+    add esp, 4
+
+    pop eax
+
+    popa
+
+    add esp, 8
+
+    iret
 

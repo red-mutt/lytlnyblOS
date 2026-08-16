@@ -47,6 +47,8 @@ typedef enum {
 } process_type_t;
 
 typedef struct process {
+    uint32_t wake_tick;
+
     uint32_t pid;
     
     process_registers_t regs;
