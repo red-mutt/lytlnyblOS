@@ -1,0 +1,9 @@
+#ifndef MAPPINGS_H
+#define MAPPINGS_H
+
+#define USER_CODE_BASE 0x00400000
+#define USER_VGA 0x00B00000
+#define HEAP_START 0xC0000000 //dir index 1, eveyrthing else 0
+
+
+#endif

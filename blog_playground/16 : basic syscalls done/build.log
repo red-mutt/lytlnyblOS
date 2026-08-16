@@ -1,0 +1,7 @@
+nasm -f bin bootloader/bootloader.asm  -o bootstrap.o
+nasm -f elf32 -g -F dwarf kernel/basic_kernel.asm  -o kernel.o
+ld -m elf_i386 -T kernel/linker.ld kernel.o -o kernel.elf
+/usr/bin/ld.bfd: warning: cannot find entry symbol start; defaulting to 00009000
+/usr/bin/ld.bfd: kernel.o: in function `p_mode_main':
+/home/totallyordinarylaptop/Projects/lytlnyblOS/src/kernel//kernel/basic_kernel.asm:63:(.text+0x4f): undefined reference to `kernel_main'
+make: *** [Makefile:9: build] Error 1
