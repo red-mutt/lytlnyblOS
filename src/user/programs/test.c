@@ -19,10 +19,11 @@ void _start(void)
 
     vga[0] = get_pid() + '0' | (0x07 << 8);
 
-    sleep(1000);
+    char input[5];
+    read(0, (void*)input, 5);
 
     char text[10] = "hellohello";
-    write(1, (void*)text, 5);
+    write(1, (void*)input, 5);
 
     
     vga[1] = 'P' | (0x07 << 8);

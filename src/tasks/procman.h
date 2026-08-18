@@ -46,8 +46,15 @@ typedef enum {
     PROCESS_USER
 } process_type_t;
 
+typedef struct {
+    void* buffer;
+    uint32_t count;
+    uint32_t size;
+} process_reading_state_t;
+
 typedef struct process {
     uint32_t wake_tick;
+    process_reading_state_t reading_state;
 
     uint32_t pid;
     

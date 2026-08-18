@@ -17,6 +17,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include "../tasks/procman.h"
+
 void keyboard_handler(void);
 void keyboard_init(void);
 void keyboard_set_keymap(void);

@@ -32,7 +32,8 @@
 #define SYSCALL_YIELD 0x03
 #define SYSCALL_SLEEP 0x04
 #define SYSCALL_WRITE 0x05
-#define SYSCALL_SBRK 0x06
+#define SYSCALL_READ 0x06
+#define SYSCALL_SBRK 0x07
 
 
 
