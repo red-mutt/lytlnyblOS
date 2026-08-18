@@ -24,3 +24,8 @@ int write(int fd, void *buff, size_t count) {
 int read(int fd, void* buff, size_t count) {
   return syscall(SYSCALL_READ, fd, (uint32_t)buff, count);
 }
+
+void* sbrk (intptr_t increment) {
+  return (void*)syscall(SYSCALL_SBRK, increment, 0, 0);
+}
+

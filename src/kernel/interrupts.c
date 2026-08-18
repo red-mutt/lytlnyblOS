@@ -3,6 +3,7 @@
 #include "timer.h"
 #include "keyboard.h"
 #include "../memory/vmm.h"
+#include "mappings.h"
 
 extern vga_text terminal;
 
@@ -164,6 +165,25 @@ void syscall_handler(registers_t* regs) {
 
             //keyboard is treated as stdin, so need to block until we recieve that data
             //need to block the process until we wait for input
+
+            break;
+
+        case SYSCALL_SBRK:
+            current_process->user_heap_end += regs->ebx;
+            
+            //allocate more pages
+            while (((current_process->user_heap_end + 4096) - USER_HEAP_START) / 4096 
+                > current_process->heap_pages_allocated){
+                map_page(current_process->page_directory,
+                    USER_HEAP_START + (current_process->heap_pages_allocated++ * 4096),
+                    (uintptr_t)alloc_frame(),
+                    PAGE_PRESENT | PAGE_USER | PAGE_WRITABLE
+                );
+                    
+            }
+
+            regs->eax = current_process->user_heap_end;
+
 
             break;
         default:

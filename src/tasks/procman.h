@@ -10,8 +10,6 @@
 
 #define INITIAL_PID 1
 #define KERNEL_STACK_SIZE 0x4000
-#define USER_STACK_TOP 0xBFFFF000
-#define NEW_PAGE_DIR_VIRT 0xD0000000
 
 extern uint8_t kernel_stack_bottom;
 
@@ -53,6 +51,9 @@ typedef struct {
 } process_reading_state_t;
 
 typedef struct process {
+    uintptr_t user_heap_end;
+    uint32_t heap_pages_allocated;
+
     uint32_t wake_tick;
     process_reading_state_t reading_state;
 

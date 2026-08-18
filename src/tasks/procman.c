@@ -101,6 +101,19 @@ void create_uprocess(process_t* new_process) {
             PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER
     );
 
+    map_page(new_process->page_directory,
+            USER_HEAP_START,
+            (uintptr_t)alloc_frame(),
+            PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER
+    );
+    /* if you ever try to create more mappings and get a general protection fault
+     * it is likely that you have overwritten an existing kernel mapping, as we copy
+     * the kernel mappings to the user process for when we use our interrupts, just
+     * be careful of this */
+
+    new_process->user_heap_end = USER_HEAP_START + 4096;
+    new_process->heap_pages_allocated = 1;
+
     new_process->ustack = (void*)(USER_STACK_TOP - 4096);
 }
 
