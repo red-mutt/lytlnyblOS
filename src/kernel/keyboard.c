@@ -217,6 +217,8 @@ void keyboard_handler () {
                 c[0] = shift_keymap[scancode];
             }
             vga_text_write(&terminal, c);
+            if (!c[0]) return;
+
             process_t* traversal_process = process_head;
             while (traversal_process) {
                 if (traversal_process->state == PROCESS_BLOCKED && traversal_process->reading_state.size > 0) {
@@ -231,6 +233,7 @@ void keyboard_handler () {
 
                     if (traversal_process->reading_state.count >= size) {
                         traversal_process->reading_state.count = 0;
+                        traversal_process->reading_state.size = 0;
                         traversal_process->state = PROCESS_READY;
                     }
                     
