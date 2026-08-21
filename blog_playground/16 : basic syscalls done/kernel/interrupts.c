@@ -3,6 +3,7 @@
 #include "timer.h"
 #include "keyboard.h"
 #include "../memory/vmm.h"
+#include "mappings.h"
 
 extern vga_text terminal;
 
@@ -106,6 +107,9 @@ void irq_handler(registers_t* regs) {
 }
 
 void syscall_handler(registers_t* regs) {
+    int fd;
+    uint32_t buffer;
+    size_t count;
     switch (regs->eax) {
         case SYSCALL_EXIT:
             current_process->state = PROCESS_TERMINATED;
@@ -124,9 +128,9 @@ void syscall_handler(registers_t* regs) {
             break;
         case SYSCALL_WRITE:
             // a rather mock version of write syscall, only used for output to the terminal, will advance more later
-            int fd = regs->ebx;
-            uint32_t buffer = regs->ecx;
-            size_t count = regs->edx;
+            fd = regs->ebx;
+            buffer = regs->ecx;
+            count = regs->edx;
 
             
             if (fd != 1) {
@@ -138,6 +142,49 @@ void syscall_handler(registers_t* regs) {
             vga_text_write(&terminal, (char*)buffer);
             
             regs->eax = (int)count;
+            break;
+        case SYSCALL_READ:
+            // just like the previous, this is a mock, will do more when we get onto file system
+
+            vga_text_write(&terminal, "we are in reading\0");
+            fd = regs->ebx;
+            buffer = regs->ecx;
+            count = regs->edx;
+
+            if (fd != 0) { 
+              regs->eax = -1;
+              return;
+            }
+
+            current_process->state = PROCESS_BLOCKED;
+            current_process->reading_state.buffer = (void*)regs->ecx;
+            current_process->reading_state.size  = regs->edx;
+            current_process->reading_state.count = 0;
+            context_switch(current_process, get_next_process(), regs);
+            
+
+            //keyboard is treated as stdin, so need to block until we recieve that data
+            //need to block the process until we wait for input
+
+            break;
+
+        case SYSCALL_SBRK:
+            current_process->user_heap_end += regs->ebx;
+            
+            //allocate more pages
+            while (((current_process->user_heap_end + 4096) - USER_HEAP_START) / 4096 
+                > current_process->heap_pages_allocated){
+                map_page(current_process->page_directory,
+                    USER_HEAP_START + (current_process->heap_pages_allocated++ * 4096),
+                    (uintptr_t)alloc_frame(),
+                    PAGE_PRESENT | PAGE_USER | PAGE_WRITABLE
+                );
+                    
+            }
+
+            regs->eax = current_process->user_heap_end;
+
+
             break;
         default:
             vga_text_writeline(&terminal, "syscall not found");

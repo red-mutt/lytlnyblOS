@@ -32,7 +32,6 @@ void timer_handler(registers_t* regs) {
     while (traversal_process) {
 
         if (traversal_process->state == PROCESS_SLEEPING && ticks >= traversal_process->wake_tick) {
-            vga_text_write_dec(&terminal, ticks);
             traversal_process->state = PROCESS_READY;
         }
         traversal_process = traversal_process->next;

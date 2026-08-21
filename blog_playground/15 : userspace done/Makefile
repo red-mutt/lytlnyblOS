@@ -46,8 +46,6 @@ build: $(BOOT_FILE) $(KERNEL_FILE)
 	objcopy -O binary user_test.elf user_test.bin
 	objcopy -I binary -O elf32-i386 -B i386 user_test.bin user_test_binary.o
 
-
-
 	ld -m elf_i386 -T $(LINKER) kernel.o kernel_main.o vga.o interruptc.o interrupta.o timer.o kb.o pmm.o vmm.o vmma.o heap.o tasks.o context.o scheduler.o tasksa.o user_test_binary.o -o kernel.elf
 
 	objcopy -O binary kernel.elf kernel.bin

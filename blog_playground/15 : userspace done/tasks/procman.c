@@ -71,7 +71,6 @@ void create_kprocess(process_t* new_process) {
     new_process->regs.cs = 0x08;
     new_process->regs.ds = 0x10;
     new_process->regs.ss = 0x10;
-    new_process->regs.eflags = 0x202;
 
     new_process->page_directory = kernel_directory;
 }
@@ -82,8 +81,6 @@ void create_uprocess(process_t* new_process) {
     new_process->regs.cs = 0x18 | 3;
     new_process->regs.ds = 0x20 | 3;
     new_process->regs.ss = 0x20 | 3;
-
-    new_process->regs.eflags = 0x202;
 
     new_process->page_directory = (page_directory_t*)alloc_frame();
     memset((page_directory_t*)new_process->page_directory, 0, 4096);

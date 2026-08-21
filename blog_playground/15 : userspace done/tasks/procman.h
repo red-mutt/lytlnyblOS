@@ -11,7 +11,6 @@
 #define INITIAL_PID 1
 #define KERNEL_STACK_SIZE 0x4000
 #define USER_STACK_TOP 0xBFFFF000
-#define NEW_PAGE_DIR_VIRT 0xD0000000
 
 extern uint8_t kernel_stack_bottom;
 
@@ -119,7 +118,6 @@ extern tss_t tss;
 extern uint8_t gdt_tss[];
 
 void init_tss(void);
-void set_kernel_stack(uintptr_t stack);
 extern void load_tss(void);
 
 #endif

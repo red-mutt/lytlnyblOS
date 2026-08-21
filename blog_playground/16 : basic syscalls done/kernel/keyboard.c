@@ -156,7 +156,6 @@ void keyboard_extended_scancodes() {
 
     /* LGUI */
     if (scancode == 0x5B) {
-        vga_text_writeline(&terminal, "LGUI PRESSED");
     }
 }
 
@@ -199,6 +198,7 @@ void keyboard_handler () {
     char c[2];
     c[0] = keymap[scancode];
     c[1] = '\0';
+
     switch (c[0]) {
         case '\n':
             vga_text_writeline(&terminal, "");
@@ -217,6 +217,30 @@ void keyboard_handler () {
                 c[0] = shift_keymap[scancode];
             }
             vga_text_write(&terminal, c);
+            if (!c[0]) return;
+
+            process_t* traversal_process = process_head;
+            while (traversal_process) {
+                if (traversal_process->state == PROCESS_BLOCKED && traversal_process->reading_state.size > 0) {
+                    void* buffer = traversal_process->reading_state.buffer;
+                    uint32_t size = traversal_process->reading_state.size;
+
+                    //quite a crude way of doing this, (really only the context switcher should 
+                    //be changing cr3), but it works
+                    set_cr3((uintptr_t)traversal_process->page_directory);
+                    ((char*)(buffer))[traversal_process->reading_state.count++] = c[0];
+                    set_cr3((uintptr_t)kernel_directory);
+
+                    if (traversal_process->reading_state.count >= size) {
+                        traversal_process->reading_state.count = 0;
+                        traversal_process->reading_state.size = 0;
+                        traversal_process->state = PROCESS_READY;
+                    }
+                    
+                }
+                
+                traversal_process = traversal_process->next;
+            }
             break;
     }
 }
