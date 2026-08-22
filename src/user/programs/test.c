@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include "../libc/output.h"
 
 #define SYSCALL_EXIT 0x01
 
@@ -20,12 +21,16 @@ void _start(void)
     vga[0] = get_pid() + '0' | (0x07 << 8);
 
     char input[5];
-    read(0, (void*)input, 5);
+    //read(0, (void*)input, 5);
 
     sbrk(4096);
 
     char text[10] = "hellohello";
     write(1, (void*)input, 5);
+    putchar('a');
+    putchar('b');
+    putchar('\n');
+    printf("i have a number it is: %d", 314);
 
     
     vga[1] = 'P' | (0x07 << 8);

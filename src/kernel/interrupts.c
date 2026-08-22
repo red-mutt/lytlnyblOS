@@ -146,7 +146,6 @@ void syscall_handler(registers_t* regs) {
         case SYSCALL_READ:
             // just like the previous, this is a mock, will do more when we get onto file system
 
-            vga_text_write(&terminal, "we are in reading\0");
             fd = regs->ebx;
             buffer = regs->ecx;
             count = regs->edx;

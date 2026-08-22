@@ -56,6 +56,10 @@ void vga_text_write(vga_text* terminal, const char* string) {
     size_t pos = terminal->row * terminal->width + terminal->column;
 
     for (size_t i = 0; string[i] != '\0'; i++) {
+        if (string[i] == '\n') {
+            vga_text_writeline(terminal, "");
+            continue;
+        }
         vga_text_putchar(terminal, string[i]);
         pos++;
         terminal->row = pos / terminal->width;
