@@ -130,6 +130,16 @@ inb:
     in al, dx
     movzx eax, al
     ret
+outw:
+    mov dx, [esp + 4]
+    mov ax, [esp + 8]
+    out dx, ax
+    ret
+inw:
+    mov dx, [esp + 4]
+    in ax, dx
+    movzx eax, ax
+    ret
 io_wait:
     mov al, 0
     out 0x80, al

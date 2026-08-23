@@ -94,6 +94,8 @@ void pic_remap(int offset1, int offset2);
 
 extern void outb(uint16_t port, uint8_t value);
 extern uint8_t inb(uint16_t port);
+extern void outw(uint16_t port, uint16_t value);
+extern uint8_t inw(uint16_t port);
 extern void io_wait(void);
 
 void pic_send_eoi(uint8_t irq);
