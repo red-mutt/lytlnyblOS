@@ -61,7 +61,7 @@ void *malloc(size_t bytes) {
   void *result;
   heap_header_t *curr;
 
-  if (!(heap_start_head->size))init_heap();  
+  if (!heap_start_head)init_heap();  
 
   heap_header_t* block = find_free_block(bytes);
   if (block) {
@@ -163,10 +163,24 @@ void* calloc(size_t n, size_t size) {
 }
 
 void* realloc(void* ptr, size_t new_size) {
-  void *new_ptr = malloc(new_size);
+  if (!ptr) return malloc(new_size);
+
+  if (new_size == 0) {
+    free(ptr);
+    return NULL;
+  }
+
+  heap_header_t* old_header = get_header(ptr);
+
+  void* new_ptr = malloc(new_size);
+
   if (new_ptr == NULL) return NULL;
 
-  memcpy(new_ptr, ptr, get_header(ptr)->size);
+  size_t copy_size = old_header->size;
+
+  if (copy_size > new_size) copy_size = new_size;
+
+  memcpy(new_ptr, ptr, copy_size);
   free(ptr);
   return new_ptr;
 }
