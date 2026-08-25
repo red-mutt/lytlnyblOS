@@ -7,6 +7,7 @@
 #include "../memory/heap.h"
 #include "../tasks/procman.h"
 #include "../filesystem/fs.h"
+#include "../filesystem/fs_manager.h"
 
 #include <stdint.h>
 
@@ -123,6 +124,7 @@ void kernel_main(void)
     if (!fs_format())
       vga_text_writeline(&terminal, "failed formating");
 
+    /*
     fs_inode_t root;
 
     if (!fs_read_inode(FS_ROOT_INODE, &root)) {
@@ -185,6 +187,32 @@ void kernel_main(void)
 
     vga_text_write(&terminal, "nested: ");
     vga_text_writeline(&terminal, hello_buf);
+
+    vga_text_write_dec(&terminal, fs_resolve_path("/docs/hello.txt"));
+    */
+
+    fs_mkdir("/dir1");
+    fs_mkdir("/dir2");
+    fs_touch("file.txt");
+
+    fs_ls("/");
+    fs_touch("/dir1/notes.txt");
+    fs_ls("/dir1");
+    fs_rm("/dir2");
+    fs_ls("/");
+
+    int32_t fd = fs_open("/dir1/notes.txt");
+
+    const char* msg = "Hello filesystem!";
+    fs_write(fd, (void*)msg, 17);
+    fs_close(fd);
+    fd = fs_open("/dir1/notes.txt");
+    char recv[18];
+    fs_read(fd, (void*)recv, 17);  
+
+    recv[17] = '\0';
+    vga_text_writeline(&terminal, recv);
+
 
     for (;;);
 }

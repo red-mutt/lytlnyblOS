@@ -16,6 +16,7 @@ CONTEXT_FILE_C = tasks/context.c
 SCHEDULER_FILE_C = tasks/scheduler.c
 ATA_FILE_C = filesystem/ata.c
 FS_FILE_C = filesystem/fs.c
+FS_M_FILE_C = filesystem/fs_manager.c
 
 
 USER_TEST_FILE_C = user/programs/test.c
@@ -48,6 +49,7 @@ build: $(BOOT_FILE) $(KERNEL_FILE)
 	nasm -f elf32 -g -F dwarf $(TASKS_FILE_ASM) -o tasksa.o
 	$(CC) -g -m32 -ffreestanding -c $(ATA_FILE_C) -o ata.o
 	$(CC) -g -m32 -ffreestanding -c $(FS_FILE_C) -o fs.o
+	$(CC) -g -m32 -ffreestanding -c $(FS_M_FILE_C) -o fsm.o
 
 	#user tests
 	$(CC) -g -m32 -ffreestanding -fno-pie -fno-pic -c $(USER_TEST_FILE_C) -o user_test.o
@@ -64,7 +66,7 @@ build: $(BOOT_FILE) $(KERNEL_FILE)
 
 
 
-	ld -m elf_i386 -T $(LINKER) kernel.o kernel_main.o vga.o interruptc.o interrupta.o timer.o kb.o pmm.o vmm.o vmma.o heap.o tasks.o context.o scheduler.o tasksa.o user_test_binary.o ata.o fs.o -o kernel.elf
+	ld -m elf_i386 -T $(LINKER) kernel.o kernel_main.o vga.o interruptc.o interrupta.o timer.o kb.o pmm.o vmm.o vmma.o heap.o tasks.o context.o scheduler.o tasksa.o user_test_binary.o ata.o fs.o fsm.o -o kernel.elf
 
 	objcopy -O binary kernel.elf kernel.bin
 	dd if=/dev/zero of=kernel.img bs=512 count=20480
