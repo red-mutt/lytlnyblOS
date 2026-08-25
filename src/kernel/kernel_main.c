@@ -14,7 +14,7 @@ vga_text terminal;
 #include "../kernel/mappings.h"
 
 void test_process() {
-    vga_text_writeline(&terminal, "PROCESS RUNNING");
+    vga_text_writeline(&terminal, "NEW KERNEL PROCESS RUNNING");
     for (;;);
 }
 
@@ -101,23 +101,24 @@ void kernel_main(void)
     uint8_t test_read[512];
 
     for (int i = 0; i < 512; i++)
-        test_write[i] = 0x55;
+        test_write[i] = 0xAA;
 
-    if (!ata_write_sector(0, test_write)) {
+    if (!ata_write_sector(50, (void*)test_write)) {
         vga_text_writeline(&terminal, "ATA WRITE FAIL");
     }
 
-    if (!ata_read_sector(0, test_read)) {
+    if (!ata_read_sector(50, (void*)test_read)) {
         vga_text_writeline(&terminal, "ATA READ FAIL");
     }
 
     for (int i = 0; i < 512; i++) {
         if (test_read[i] != test_write[i]) {
-            vga_text_writeline(&terminal, "ATA DATA FAIL");
+            vga_text_write_dec(&terminal, i);
+            vga_text_writeline(&terminal, " ATA DATA FAILLLLLLLLLLLLLLLLLLLLLLLLLLL");
             break;
         }
     }
-    // FILE SYSTEM SETUPPP
+    // FILE SYSTEM TESTS
     
     if (!fs_format())
       vga_text_writeline(&terminal, "failed formating");
@@ -128,22 +129,62 @@ void kernel_main(void)
       vga_text_writeline(&terminal, "failed to get root inode");
     }
 
+    //create file 
+
     int32_t notes = fs_create_file(FS_ROOT_INODE, "notes.txt");
     if (notes < 0)
       vga_text_writeline(&terminal, "failed to create notes.txt");
+
+    // write to file
 
     const char* msg = "Hello filesystem!";
     if (fs_write_file(notes, msg, 17, 0) != 17)
       vga_text_writeline(&terminal, "failed to write to notes.txt");
 
+    //read full text
     
     char buf[18];
-    if (read_file(notes, buf, 17, 0) != 17) 
+    if (fs_read_file(notes, buf, 17, 0) != 17) 
       vga_text_writeline(&terminal, "failed to read file");
     buf[17] = '\0';
 
     vga_text_write(&terminal, "notes.txt: ");
     vga_text_writeline(&terminal, buf);
+
+    //read partial text
+    char partial[6];
+    if (fs_read_file(notes, partial, 5, 6) != 5)
+        vga_text_writeline(&terminal, "partial read failed");
+    partial[5] = '\0';
+
+    vga_text_write(&terminal, "partial: ");
+    vga_text_writeline(&terminal, partial);
+
+    //create directory
+    int32_t docs = fs_create_directory(FS_ROOT_INODE, "docs");
+
+    if (docs < 0)
+        vga_text_writeline(&terminal, "directory failed");
+
+    // create file inside of directory and write to it
+    int32_t inside = fs_create_file(docs, "hello.txt");
+
+    if (inside < 0)
+        vga_text_writeline(&terminal, "nested file failed");
+
+    const char* hello = "hello";
+
+    fs_write_file(inside, hello, 5, 0);
+
+    //read file in directory
+    char hello_buf[6];
+
+    fs_read_file(inside, hello_buf, 5, 0);
+
+    hello_buf[5] = '\0';
+
+    vga_text_write(&terminal, "nested: ");
+    vga_text_writeline(&terminal, hello_buf);
 
     for (;;);
 }

@@ -67,7 +67,8 @@ build: $(BOOT_FILE) $(KERNEL_FILE)
 	ld -m elf_i386 -T $(LINKER) kernel.o kernel_main.o vga.o interruptc.o interrupta.o timer.o kb.o pmm.o vmm.o vmma.o heap.o tasks.o context.o scheduler.o tasksa.o user_test_binary.o ata.o fs.o -o kernel.elf
 
 	objcopy -O binary kernel.elf kernel.bin
-	dd if=bootstrap.o of=kernel.img
+	dd if=/dev/zero of=kernel.img bs=512 count=20480
+	dd if=bootstrap.o of=kernel.img conv=notrunc
 	dd if=kernel.bin of=kernel.img seek=1 conv=notrunc
 	qemu-system-i386 -drive format=raw,file=kernel.img #-s -S
 

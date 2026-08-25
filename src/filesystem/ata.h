@@ -25,6 +25,8 @@
 
 #define ATA_SECTOR_SIZE 512
 
+#define ATA_ALT_STATUS 0x3F6
+
 
 #include "../kernel/interrupts.h"
 

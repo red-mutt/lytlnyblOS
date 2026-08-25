@@ -8,7 +8,7 @@
 
 #define FS_BLOCK_SIZE 512
 
-#define FS_START_BLOCK 50
+#define FS_START_BLOCK 70
 #define FS_SUPERBLOCK FS_START_BLOCK // 1 block
 #define FS_BITMAP_BLOCK FS_START_BLOCK + 1 //1 block
 #define FS_INODE_START FS_START_BLOCK + 2 //block count calculated when formatting
@@ -82,7 +82,7 @@ bool fs_remove_directory_entry(uint32_t directory_inode, const char* name);
 
 int32_t fs_create_file(uint32_t directory_inode, const char* name);
 int32_t fs_create_directory(uint32_t parent_inode, const char* name);
-int32_t read_file(uint32_t file_inode_number, void* read_buffer, uint32_t size, uint32_t offset);
+int32_t fs_read_file(uint32_t file_inode_number, void* read_buffer, uint32_t size, uint32_t offset);
 int32_t fs_write_file(uint32_t inode_number, const void* write_buffer, uint32_t size, uint32_t offset);
 bool fs_delete_file(uint32_t directory_inode, const char* name);
 

@@ -493,7 +493,7 @@ int32_t fs_create_directory(uint32_t parent_inode, const char* name) {
   return dir_inode_number;
 }
 
-int32_t read_file(uint32_t file_inode_number, void* read_buffer, uint32_t size, uint32_t offset) {
+int32_t fs_read_file(uint32_t file_inode_number, void* read_buffer, uint32_t size, uint32_t offset) {
   fs_inode_t file_inode;
   uint8_t buffer[FS_BLOCK_SIZE];
 
