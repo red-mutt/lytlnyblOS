@@ -20,15 +20,13 @@ static bool ata_wait_drq() {
 
 static void ata_select_drive(uint32_t lba) {
   outb(ATA_DRIVE, ATA_DRIVE_MASTER | ((lba >> 24) & 0x0F));
-
   io_wait();
 }
 
-int ata_init() {
+void init_ata() {
   outb(ATA_DRIVE, ATA_DRIVE_MASTER);
   io_wait();
   ata_wait_bsy();
-  return 0;
 }
 
 bool ata_read_sector(uint32_t lba, void* buffer) {
@@ -45,6 +43,7 @@ bool ata_read_sector(uint32_t lba, void* buffer) {
   outb(ATA_LBA_HIGH, (lba >> 16) & 0xFF);
 
   outb(ATA_COMMAND, ATA_CMD_READ_PIO);
+  io_wait();
 
   ata_wait_bsy();
 
@@ -52,7 +51,10 @@ bool ata_read_sector(uint32_t lba, void* buffer) {
 
   for (int i = 0; i < 256; i++) {
     data[i] = inw(ATA_DATA);
+    io_wait();
   }
+
+  ata_wait_bsy();
 
   return true;
 }
@@ -64,18 +66,25 @@ bool ata_write_sector(uint32_t lba, const void* buffer) {
 
   ata_select_drive (lba);
 
+  outb(ATA_SECTOR_COUNT, 1);
+
   outb(ATA_LBA_LOW, lba & 0xFF);
   outb(ATA_LBA_MID, (lba >> 8) & 0xFF);
   outb(ATA_LBA_HIGH, (lba >> 16) & 0xFF);
 
   outb(ATA_COMMAND, ATA_CMD_WRITE_PIO);
+  io_wait();
 
   ata_wait_bsy();
+
   if (!ata_wait_drq()) return false;
 
   for (int i = 0; i < 256; i++) {
     outw(ATA_DATA, data[i]);
+    io_wait();
   }
+
+  ata_wait_bsy();
 
   return true;
 }

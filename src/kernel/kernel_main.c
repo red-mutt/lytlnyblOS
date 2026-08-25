@@ -6,6 +6,7 @@
 #include "../memory/vmm.h"
 #include "../memory/heap.h"
 #include "../tasks/procman.h"
+#include "../filesystem/fs.h"
 
 #include <stdint.h>
 
@@ -91,6 +92,58 @@ void kernel_main(void)
         0xB8000,
         PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER
     );
+
+
+    
+    init_ata();
+
+    uint8_t test_write[512];
+    uint8_t test_read[512];
+
+    for (int i = 0; i < 512; i++)
+        test_write[i] = 0x55;
+
+    if (!ata_write_sector(0, test_write)) {
+        vga_text_writeline(&terminal, "ATA WRITE FAIL");
+    }
+
+    if (!ata_read_sector(0, test_read)) {
+        vga_text_writeline(&terminal, "ATA READ FAIL");
+    }
+
+    for (int i = 0; i < 512; i++) {
+        if (test_read[i] != test_write[i]) {
+            vga_text_writeline(&terminal, "ATA DATA FAIL");
+            break;
+        }
+    }
+    // FILE SYSTEM SETUPPP
+    
+    if (!fs_format())
+      vga_text_writeline(&terminal, "failed formating");
+
+    fs_inode_t root;
+
+    if (!fs_read_inode(FS_ROOT_INODE, &root)) {
+      vga_text_writeline(&terminal, "failed to get root inode");
+    }
+
+    int32_t notes = fs_create_file(FS_ROOT_INODE, "notes.txt");
+    if (notes < 0)
+      vga_text_writeline(&terminal, "failed to create notes.txt");
+
+    const char* msg = "Hello filesystem!";
+    if (fs_write_file(notes, msg, 17, 0) != 17)
+      vga_text_writeline(&terminal, "failed to write to notes.txt");
+
+    
+    char buf[18];
+    if (read_file(notes, buf, 17, 0) != 17) 
+      vga_text_writeline(&terminal, "failed to read file");
+    buf[17] = '\0';
+
+    vga_text_write(&terminal, "notes.txt: ");
+    vga_text_writeline(&terminal, buf);
 
     for (;;);
 }

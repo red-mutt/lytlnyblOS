@@ -122,19 +122,24 @@ int32_t fs_alloc_block() {
   fs_superblock_t superblock;
 
   if (!fs_read_superblock(&superblock))
-    return false;
+    return -1;
   if (!fs_read_block(superblock.bitmap_start, buffer))
-    return false;
+    return -1;
 
   uint32_t i;
   for (i = 0; i < superblock.total_blocks; i++) {
-    uint32_t is_reserved = (buffer[i / 8] & (1 << (i & 8)));
+    uint32_t is_reserved = (buffer[i / 8] & (1 << (i % 8)));
     if (!is_reserved) {
       buffer[i / 8] |= (1 << (i % 8));
       break;
     }
   }
 
+  if (i == superblock.total_blocks)
+    return -1;
+
+  superblock.free_blocks--;
+  fs_write_superblock(&superblock);
   fs_write_block(superblock.bitmap_start, buffer);
   return i;
 }
@@ -148,8 +153,12 @@ bool fs_free_block(uint32_t block) {
   if (!fs_read_block(superblock.bitmap_start, buffer))
     return false;
 
-  uint32_t i = block / FS_BLOCK_SIZE;
-  buffer[i / 8] &= ~(1 << (i % 8));
+  uint32_t byte = block / 8;
+  uint32_t bit = block % 8;
+
+  buffer[byte] &= ~(1 << bit);
+
+  superblock.free_blocks++;
 
   if (!fs_write_block(superblock.bitmap_start, buffer))
     return false;
@@ -392,7 +401,7 @@ bool fs_remove_directory_entry(uint32_t directory_inode, const char* name) {
     fs_directory_entry_t* entries = (fs_directory_entry_t*)buffer;
 
     for (uint32_t j = 0; j < entries_per_block; j++) {
-      if (entries[i].inode == 0)
+      if (entries[j].inode == 0)
         continue;
 
       int k = 0;
@@ -408,6 +417,11 @@ bool fs_remove_directory_entry(uint32_t directory_inode, const char* name) {
         entries[j].inode = 0;
         
         if (!fs_write_block(directory.blocks[i], buffer))
+          return false;
+
+        directory.size -= sizeof(fs_directory_entry_t);
+
+        if (!fs_write_inode(directory_inode, &directory))
           return false;
 
         return true;
@@ -523,12 +537,77 @@ int32_t read_file(uint32_t file_inode_number, void* read_buffer, uint32_t size, 
   return bytes_read;
 }
 
+int32_t fs_write_file(uint32_t inode_number, const void* write_buffer, uint32_t size, uint32_t offset) {
+  fs_inode_t file_inode;
 
+  uint8_t buffer[FS_BLOCK_SIZE];
 
+  if (!fs_read_inode(inode_number, &file_inode))
+    return -1;
 
+  const uint8_t* source = (const uint8_t*)write_buffer;
+  uint32_t bytes_written = 0;
 
+  while (bytes_written < size) {
+    uint32_t position = offset + bytes_written;
 
-bool init_fs() {
-  init_ata();
+    uint32_t block_index = position / FS_BLOCK_SIZE;
+    uint32_t block_offset = position % FS_BLOCK_SIZE;
+
+    if (block_index >= FS_INODE_MAX_BLOCKS)
+      break;
+
+    //block not allocated, so allocate one and make it free, if else just read block.
+    if (file_inode.blocks[block_index] == 0) {
+      int32_t block = fs_alloc_block();
+
+      if (block < 0)
+        return -1;
+
+      file_inode.blocks[block_index] = block;
+
+      for (int i = 0; i < FS_BLOCK_SIZE; i++)
+        buffer[i] = 0;
+    } else {
+      if (!fs_read_block(file_inode.blocks[block_index], buffer))
+          return -1;
+    }
+
+    uint32_t bytes = FS_BLOCK_SIZE - block_offset;
+
+    if (bytes > size - bytes_written)
+      bytes = size - bytes_written;
+
+    for (uint32_t i = 0; i < bytes; i++)
+      buffer[block_offset + i] = source[bytes_written + i];
+
+    if (!fs_write_block(file_inode.blocks[block_index], buffer))
+      return -1;
+
+    bytes_written += bytes;
+  }
+
+  if (offset + bytes_written > file_inode.size)
+    file_inode.size = offset + bytes_written;
+
+  if (!fs_write_inode(inode_number, &file_inode))
+    return -1;
+
+  return bytes_written;
+}
+
+bool fs_delete_file(uint32_t directory_inode, const char* name) {
+  int32_t inode_number = fs_find_directory_entry(directory_inode, name);
+
+  if (inode_number < 0)
+    return false;
+
+  if (!fs_remove_directory_entry(directory_inode, name))
+    return false;
+
+  if (!fs_free_inode(inode_number))
+    return false;
+
   return true;
 }
+

@@ -66,7 +66,6 @@ bool fs_write_superblock(const fs_superblock_t* superblock);
 bool fs_read_superblock(fs_superblock_t* superblock);
 
 bool fs_format(void);
-bool init_fs(void);
 
 int32_t fs_alloc_block(void);
 bool fs_free_block(uint32_t block);
@@ -82,6 +81,10 @@ bool fs_add_directory_entry(uint32_t directory_inode, uint32_t inode_number, con
 bool fs_remove_directory_entry(uint32_t directory_inode, const char* name);
 
 int32_t fs_create_file(uint32_t directory_inode, const char* name);
+int32_t fs_create_directory(uint32_t parent_inode, const char* name);
+int32_t read_file(uint32_t file_inode_number, void* read_buffer, uint32_t size, uint32_t offset);
+int32_t fs_write_file(uint32_t inode_number, const void* write_buffer, uint32_t size, uint32_t offset);
+bool fs_delete_file(uint32_t directory_inode, const char* name);
 
 
 

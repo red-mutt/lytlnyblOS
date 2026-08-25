@@ -8,6 +8,8 @@ global idt_load
 global isr0
 global outb
 global inb
+global outw
+global inw
 global io_wait
 global syscall_entry
 
