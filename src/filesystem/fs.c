@@ -1,9 +1,6 @@
 #include "fs.h"
+#include "../kernel/kernel_utils.h"
 
-//NOTE POTENTIALLY NEED MEMSET AND MEMCPY FUNCTIONS INSTEAD OF EMBEDDING LOOPS, i make a note instead of doing this because
-//it would probably be better to make a general C file for this to be used throughout the whole kernel
-//
-//
 //tried refactoring code to use uin32_t instead of signed integers, 
 
 bool fs_read_block(uint32_t block_num, void* buffer) {
@@ -40,7 +37,7 @@ bool fs_read_superblock(fs_superblock_t* superblock) {
   return true;
 }
 
-bool fs_format() {
+bool fs_format(void) {
   fs_superblock_t superblock;
   fs_inode_t root_inode;
   uint8_t buffer[FS_BLOCK_SIZE];
@@ -105,14 +102,14 @@ bool fs_format() {
     return false;
 
   //empty root dir block
-  memset(buffer, 0, sizeof(fs_inode_t));
+  memset(buffer, 0, FS_BLOCK_SIZE);
   if (!fs_write_block(root_block, buffer))
     return false; 
 
   return true;
 }
 
-int32_t fs_alloc_block() {
+int32_t fs_alloc_block(void) {
   uint8_t buffer[FS_BLOCK_SIZE];
   fs_superblock_t superblock;
 
