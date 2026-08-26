@@ -18,25 +18,21 @@ bool fs_write_block(uint32_t block_num, const void* buffer) {
 
 bool fs_write_superblock(const fs_superblock_t* superblock) {
   uint8_t buffer[FS_BLOCK_SIZE];
-  size_t i;
 
-  for (i = 0; i < FS_BLOCK_SIZE; i++) buffer[i] = 0x00;
+  memset(buffer, 0, FS_BLOCK_SIZE);
 
-  for (i = 0; i < sizeof(fs_superblock_t); i++) 
-    buffer[i] = ((uint8_t*)(superblock))[i];
+  memcpy(buffer,superblock, sizeof(fs_superblock_t));
 
   return fs_write_block(FS_SUPERBLOCK, buffer);
 }
 
 bool fs_read_superblock(fs_superblock_t* superblock) {
   uint8_t buffer[FS_BLOCK_SIZE];
-  size_t i;
 
   if (!fs_read_block(FS_SUPERBLOCK, buffer))
     return false;
 
-  for(i = 0; i < sizeof(fs_superblock_t); i++)
-    ((uint8_t*)superblock)[i] = buffer[i];
+  memcpy(superblock, buffer, sizeof(fs_superblock_t));
 
   if (superblock->magic != FS_MAGIC)
     return false;
@@ -48,7 +44,6 @@ bool fs_format() {
   fs_superblock_t superblock;
   fs_inode_t root_inode;
   uint8_t buffer[FS_BLOCK_SIZE];
-  size_t i;
 
   superblock.magic = FS_MAGIC;
   superblock.block_size = FS_BLOCK_SIZE;
@@ -71,8 +66,7 @@ bool fs_format() {
   if (!fs_write_superblock(&superblock))
     return false;
 
-  for (i = 0; i < FS_BLOCK_SIZE; i++) 
-    buffer[i] = 0;
+  memset(buffer, 0, FS_BLOCK_SIZE);
 
   //mark everything other than the data as used (in the bitmap)
   for (uint32_t block = 0; block < superblock.data_start; block++) {
@@ -91,8 +85,7 @@ bool fs_format() {
     return false;
 
   //clear inode table blocks
-  for(i = 0; i < FS_BLOCK_SIZE; i++)
-    buffer[i] = 0;
+  memset(buffer, 0, FS_BLOCK_SIZE);
   for(
     uint32_t block = 0;
     block < superblock.inode_blocks;
@@ -102,9 +95,7 @@ bool fs_format() {
   }
 
   //set up root inode
-  uint8_t* root_bytes = (uint8_t*)&root_inode;
-  for (i = 0; i < sizeof(fs_inode_t); i++) 
-    root_bytes[i] = 0;
+  memset(&root_inode, 0, sizeof(fs_inode_t));
 
   root_inode.type = FS_TYPE_DIRECTORY;
   root_inode.size = 0;
@@ -114,8 +105,7 @@ bool fs_format() {
     return false;
 
   //empty root dir block
-  for (i = 0; i < FS_BLOCK_SIZE; i++)
-    buffer[i] = 0;
+  memset(buffer, 0, sizeof(fs_inode_t));
   if (!fs_write_block(root_block, buffer))
     return false; 
 
@@ -243,8 +233,7 @@ int32_t fs_alloc_inode(uint8_t type) {
       inode.type = type;
       inode.size = 0;
 
-      for (size_t j = 0; j < FS_INODE_MAX_BLOCKS; j++)
-        inode.blocks[j] = 0;
+      memset(inode.blocks, 0, sizeof(inode.blocks));
 
       if (!fs_write_inode(i, &inode))
         return -1;
@@ -265,9 +254,6 @@ bool fs_free_inode(uint32_t inode_num) {
   fs_inode_t inode;
   bool failure = false;
 
-  if (!fs_read_superblock(&superblock))
-    return false;
-
   if (!fs_read_inode(inode_num, &inode))
     return false;
 
@@ -282,14 +268,17 @@ bool fs_free_inode(uint32_t inode_num) {
     }
   }
 
+  if (failure)
+    return false;
+
   inode.type = FS_TYPE_FREE;
   inode.size = 0;
 
   if (!fs_write_inode(inode_num, &inode))
     return false;
 
-  if (failure)
-    return true;
+  if (!fs_read_superblock(&superblock))
+    return false;
 
   superblock.free_inodes++;
 
@@ -321,18 +310,10 @@ int32_t fs_find_directory_entry(uint32_t directory_inode_num, const char* name) 
       if (entries[j].inode == 0) 
         continue;
 
-      size_t k = 0;
-
-      while (
-        name[k] != '\0' &&
-        entries[j].name[k] != '\0' &&
-        name[k] == entries[j].name[k]) {
-        k++;
-      }
-
-      if (name[k] == '\0' && entries[j].name[k] == '\0')
+      if (strcmp(name, entries[j].name) == 0)
         return entries[j].inode;
     }
+
   }
   return -1;
 }
@@ -356,8 +337,7 @@ bool fs_add_directory_entry(uint32_t directory_inode_num, uint32_t inode_num, co
 
       directory.blocks[i] = block_num;
 
-      for (size_t j = 0; j < FS_BLOCK_SIZE; j++)
-        buffer[j] = 0;
+      memset(buffer, 0, FS_BLOCK_SIZE);
 
       if (!fs_write_block(block_num, buffer)) {
         fs_free_block(block_num);
@@ -372,16 +352,13 @@ bool fs_add_directory_entry(uint32_t directory_inode_num, uint32_t inode_num, co
 
     //search for free entry indicated by the .inode, if not found, will go to next iteration of 
     //block loop, if free, allocate it accordingly and then return true
-    for (uint32_t j = 0; j < entries_per_block; j++) {
+    for (size_t j = 0; j < entries_per_block; j++) {
       if (entries[j].inode == 0) {
         entries[j].inode = inode_num;
 
-        for (size_t k = 0; k < FS_FILENAME_LENGTH; k++)
-          entries[j].name[k] = 0;
+        memset(entries[j].name, 0, FS_FILENAME_LENGTH);
 
-        for (size_t k = 0; k < FS_FILENAME_LENGTH - 1 && name[k] != '\0'; k++) {
-          entries[j].name[k] = name[k]; 
-        }
+        strncpy(entries[j].name, name, FS_FILENAME_LENGTH - 1);
 
         if (!fs_write_block(directory.blocks[i], buffer))
           return false;
@@ -417,18 +394,11 @@ bool fs_remove_directory_entry(uint32_t directory_inode_num, const char* name) {
     fs_directory_entry_t* entries = (fs_directory_entry_t*)buffer;
 
     for (uint32_t j = 0; j < entries_per_block; j++) {
+
       if (entries[j].inode == 0)
         continue;
 
-      size_t k = 0;
-
-      while (name[k] != '\0' && 
-        entries[j].name[k] != '\0' &&
-        name[k] == entries[j].name[k]) {
-        k++;
-      }
-
-      if (name[k] == '\0' && entries[j].name[k] == '\0') {
+      if (strcmp(name, entries[j].name) == 0) {
         //entry to remove found
         entries[j].inode = 0;
         
@@ -485,17 +455,14 @@ int32_t fs_create_directory(uint32_t parent_inode_num, const char* name) {
   if (!fs_read_inode(dir_inode_num, &dir_inode))
     goto fail;
 
-  for(size_t i = 0; i < FS_INODE_MAX_BLOCKS; i++)
-    dir_inode.blocks[i] = 0;
+  memset(dir_inode.blocks, 0, sizeof(dir_inode.blocks));
 
   dir_inode.blocks[0] = block_num;
   dir_inode.size = 0;
 
   uint8_t buffer[FS_BLOCK_SIZE];
 
-  //clear only block
-  for (size_t i = 0; i < FS_BLOCK_SIZE; i++) 
-    buffer[i] = 0;
+  memset(buffer, 0, FS_BLOCK_SIZE);
 
   if (!fs_write_block(block_num, buffer))
     goto fail;
@@ -548,9 +515,7 @@ int32_t fs_read_file(uint32_t file_inode_num, void* read_buffer, uint32_t size, 
     if (bytes > size - bytes_read)
       bytes = size - bytes_read;
 
-    for (uint32_t i = 0; i < bytes; i++)
-      destination[bytes_read + i] =
-        buffer[block_offset + i];
+    memcpy(destination + bytes_read, buffer + block_offset, bytes);
 
     bytes_read += bytes;
   }
@@ -560,7 +525,6 @@ int32_t fs_read_file(uint32_t file_inode_num, void* read_buffer, uint32_t size, 
 
 int32_t fs_write_file(uint32_t inode_num, const void* write_buffer, uint32_t size, uint32_t offset) {
   fs_inode_t file_inode;
-
   uint8_t buffer[FS_BLOCK_SIZE];
 
   if (!fs_read_inode(inode_num, &file_inode))
@@ -587,8 +551,7 @@ int32_t fs_write_file(uint32_t inode_num, const void* write_buffer, uint32_t siz
 
       file_inode.blocks[block_index] = block;
 
-      for (size_t i = 0; i < FS_BLOCK_SIZE; i++)
-        buffer[i] = 0;
+      memset(buffer, 0, FS_BLOCK_SIZE);
     } else {
       if (!fs_read_block(file_inode.blocks[block_index], buffer))
           return -1;
@@ -599,8 +562,7 @@ int32_t fs_write_file(uint32_t inode_num, const void* write_buffer, uint32_t siz
     if (bytes > size - bytes_written)
       bytes = size - bytes_written;
 
-    for (uint32_t i = 0; i < bytes; i++)
-      buffer[block_offset + i] = source[bytes_written + i];
+    memcpy(buffer + block_offset, source + bytes_written, bytes);
 
     if (!fs_write_block(file_inode.blocks[block_index], buffer))
       return -1;
@@ -617,7 +579,6 @@ int32_t fs_write_file(uint32_t inode_num, const void* write_buffer, uint32_t siz
   return bytes_written;
 }
 
-//is this a useless function?
 bool fs_delete_file(uint32_t directory_inode, const char* name) {
   int32_t inode_num = fs_find_directory_entry(directory_inode, name);
 

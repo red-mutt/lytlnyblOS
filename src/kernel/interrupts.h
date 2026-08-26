@@ -35,6 +35,7 @@
 #define SYSCALL_READ 0x06
 #define SYSCALL_SBRK 0x07
 
+#include "kernel_utils.h"
 
 
 #include <stdint.h>
@@ -151,8 +152,6 @@ extern void isr28(void);
 extern void isr29(void);
 extern void isr30(void);
 extern void isr31(void);
-
-void memset(void* ptr, uint8_t val, uint32_t size);
 
 extern void syscall_entry(void);
 

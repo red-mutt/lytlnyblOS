@@ -6,6 +6,7 @@
 #include <stddef.h>
 
 #include "ata.h"
+#include "../kernel/kernel_utils.h"
 
 #define FS_BLOCK_SIZE 512
 
