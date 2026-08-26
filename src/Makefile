@@ -1,5 +1,5 @@
 BOOT_FILE = bootloader/bootloader.asm 
-KERNEL_FILE = kernel/basic_kernel.asm 
+KERNEL_FILE = kernel/kernel_intro.asm 
 KERNEL_FILES_C = kernel/kernel_main.c
 VGA_FILE_C = kernel/vga_text.c
 INTERRUPT_FILE_C = kernel/interrupts.c
