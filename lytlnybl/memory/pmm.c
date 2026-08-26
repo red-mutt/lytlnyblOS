@@ -36,6 +36,8 @@ void free_frame(void* frame_address) {
 void init_pmm() {
     uint16_t map_entry_count = *(uint16_t*)0x4FFC;
     memory_map_entry_t* memory_map = (memory_map_entry_t*)0x5000;
+
+    /*
     
     vga_text_write(&terminal, "Entries: ");
     vga_text_write_hex(&terminal, map_entry_count);
@@ -53,6 +55,8 @@ void init_pmm() {
         vga_text_write_hex(&terminal, memory_map[i].type);
         vga_text_writeline(&terminal, "");
     }
+
+    */
 
     uint64_t max_usable_address = 0;
 
@@ -114,7 +118,8 @@ void init_pmm() {
         bitmap_set_frame(kernel_frame_index);
     }
 
-    print_bitmap_summary();
+
+    //print_bitmap_summary();
 
 }
 

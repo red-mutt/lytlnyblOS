@@ -1,85 +1,91 @@
-BOOT_FILE = boot/bootloader.asm 
-KERNEL_FILE = kernel/kernel_intro.asm 
-KERNEL_FILES_C = kernel/kernel_main.c
-VGA_FILE_C = kernel/drivers/vga_text.c
-INTERRUPT_FILE_C = kernel/interrupts.c
-INTERRUPT_FILE_ASM = kernel/interrupts.asm
-TIMER_FILE_C = kernel/drivers/timer.c
-kb_file_c = kernel/drivers/keyboard.c
-PMM_FILE_C = memory/pmm.c
-VMM_FILE_C = memory/vmm.c
-VMM_FILE_ASM = memory/vmm.asm
-HEAP_FILE_C = memory/heap.c
-TASKS_FILE_C = tasks/procman.c
-TASKS_FILE_ASM = tasks/procman.asm
-CONTEXT_FILE_C = tasks/context.c
-SCHEDULER_FILE_C = tasks/scheduler.c
-ATA_FILE_C = kernel/drivers/ata.c
-FS_FILE_C = filesystem/fs.c
-FS_M_FILE_C = filesystem/fs_manager.c
-KERNEL_UTILS_C = kernel/kernel_utils.c
-
-
-USER_TEST_FILE_C = user/programs/test.c
-SYSCALLS_ASM = user/libc/syscalls.asm
-SYSCALLS_C = user/libc/syscalls.c
-OUTPUT_C = user/libc/output.c
-MEMORY_C = user/libc/memory.c
-USER_LINKER = user/user.ld
-
-LINKER = kernel/linker.ld
-
 CC = i686-elf-gcc
-        
-build: $(BOOT_FILE) $(KERNEL_FILE)
-	nasm -f bin $(BOOT_FILE) -o bootstrap.o
-	nasm -f elf32 -g -F dwarf $(KERNEL_FILE) -o kernel.o
-	$(CC) -g -m32 -Iinclude -ffreestanding -c $(KERNEL_FILES_C) -o kernel_main.o
-	$(CC) -g -m32 -Iinclude -ffreestanding -c $(VGA_FILE_C) -o vga.o
-	$(CC) -g -m32 -Iinclude -ffreestanding -c $(INTERRUPT_FILE_C) -o interruptc.o
-	nasm -f elf32 -g -F dwarf $(INTERRUPT_FILE_ASM) -o interrupta.o
-	$(CC) -g -m32 -Iinclude -ffreestanding -c $(TIMER_FILE_C) -o timer.o
-	$(CC) -g -m32 -Iinclude -ffreestanding -c $(kb_file_c) -o kb.o
-	$(CC) -g -m32 -Iinclude -ffreestanding -c $(PMM_FILE_C) -o pmm.o
-	$(CC) -g -m32 -Iinclude -ffreestanding -c $(VMM_FILE_C) -o vmm.o
-	nasm -f elf32 -g -F dwarf $(VMM_FILE_ASM) -o vmma.o
-	$(CC) -g -m32 -Iinclude -ffreestanding -c $(HEAP_FILE_C) -o heap.o
-	$(CC) -g -m32 -Iinclude -ffreestanding -c $(TASKS_FILE_C) -o tasks.o
-	$(CC) -g -m32 -Iinclude -ffreestanding -c $(CONTEXT_FILE_C) -o context.o
-	$(CC) -g -m32 -Iinclude -ffreestanding -c $(SCHEDULER_FILE_C) -o scheduler.o
-	nasm -f elf32 -g -F dwarf $(TASKS_FILE_ASM) -o tasksa.o
-	$(CC) -g -m32 -Iinclude -ffreestanding -c $(ATA_FILE_C) -o ata.o
-	$(CC) -g -m32 -Iinclude -ffreestanding -c $(FS_FILE_C) -o fs.o
-	$(CC) -g -m32 -Iinclude -ffreestanding -c $(FS_M_FILE_C) -o fsm.o
-	$(CC) -g -m32 -Iinclude -ffreestanding -c $(KERNEL_UTILS_C) -o kernel_utils.o
+LD = ld
+NASM = nasm
+OBJCOPY = objcopy
 
-	#user tests
-	$(CC) -g -m32 -Iinclude -ffreestanding -fno-pie -fno-pic -c $(USER_TEST_FILE_C) -o user_test.o
-	nasm -f elf32 -g -F dwarf $(SYSCALLS_ASM) -o syscalls_a.o
-	$(CC) -g -m32 -Iinclude -ffreestanding -fno-pie -fno-pic -c $(SYSCALLS_C) -o syscalls_c.o
-	$(CC) -g -m32 -Iinclude -ffreestanding -fno-pie -fno-pic -c $(OUTPUT_C) -o output_c.o
-	$(CC) -g -m32 -Iinclude -ffreestanding -fno-pie -fno-pic -c $(MEMORY_C) -o memory_c.o
+CFLAGS = -g -m32 -Iinclude -ffreestanding
+USER_CFLAGS = $(CFLAGS) -fno-pie -fno-pic
+
+BUILD_DIR = build
+
+KERNEL_ENTRY_ASM = kernel/kernel_intro.asm
+KERNEL_ENTRY_OBJECT = $(BUILD_DIR)/$(KERNEL_ENTRY_ASM:.asm=.asm.o)
+
+KERNEL_C_FILES = $(shell find kernel memory filesystem tasks -name '*.c')
+KERNEL_ASM_FILES = $(shell find kernel memory tasks -name '*.asm')
+
+USER_C_FILES = $(shell find user -name '*.c')
+USER_ASM_FILES = $(shell find user -name '*.asm')
+
+KERNEL_C_OBJECTS = $(KERNEL_C_FILES:%.c=$(BUILD_DIR)/%.o)
+KERNEL_ASM_OBJECTS = $(KERNEL_ASM_FILES:%.asm=$(BUILD_DIR)/%.asm.o)
+
+USER_C_OBJECTS = $(USER_C_FILES:%.c=$(BUILD_DIR)/%.o)
+USER_ASM_OBJECTS = $(USER_ASM_FILES:%.asm=$(BUILD_DIR)/%.asm.o)
+
+BOOTLOADER = $(BUILD_DIR)/bootloader.bin
+
+USER_ELF = $(BUILD_DIR)/user_test.elf
+USER_BIN = $(BUILD_DIR)/user_test.bin
+USER_BINARY_O = $(BUILD_DIR)/user_test_binary.o
+
+KERNEL_ELF = $(BUILD_DIR)/kernel.elf
+KERNEL_BIN = $(BUILD_DIR)/kernel.bin
+KERNEL_IMG = $(BUILD_DIR)/kernel.img
+
+USER_LINKER = user/user.ld
+KERNEL_LINKER = kernel/linker.ld
 
 
+.PHONY: build clean
 
-	ld -m elf_i386 -T $(USER_LINKER) user_test.o syscalls_a.o syscalls_c.o output_c.o memory_c.o -o user_test.elf
-	objcopy -O binary user_test.elf user_test.bin
-	objcopy -I binary -O elf32-i386 -B i386 user_test.bin user_test_binary.o
+build: $(KERNEL_IMG) 
 
+$(BUILD_DIR)/%.o: %.c
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
 
+$(BUILD_DIR)/%.asm.o: %.asm
+	mkdir -p $(dir $@)
+	$(NASM) -f elf32 -g -F dwarf $< -o $@
 
-	ld -m elf_i386 -T $(LINKER) kernel.o kernel_main.o vga.o interruptc.o interrupta.o timer.o kb.o pmm.o vmm.o vmma.o heap.o tasks.o context.o scheduler.o tasksa.o user_test_binary.o ata.o fs.o fsm.o kernel_utils.o -o kernel.elf
+$(BOOTLOADER): boot/bootloader.asm
+	mkdir -p $(dir $@)
+	$(NASM) -f bin $< -o $@
 
-	objcopy -O binary kernel.elf kernel.bin
-	dd if=/dev/zero of=kernel.img bs=512 count=20480
-	dd if=bootstrap.o of=kernel.img conv=notrunc
-	dd if=kernel.bin of=kernel.img seek=1 conv=notrunc
-	qemu-system-i386 -drive format=raw,file=kernel.img #-s -S
+$(USER_ELF): $(USER_C_OBJECTS) $(USER_ASM_OBJECTS)
+	mkdir -p $(dir $@)
+	$(LD) -m elf_i386 -T $(USER_LINKER) \
+		$(USER_C_OBJECTS) \
+		$(USER_ASM_OBJECTS) \
+		-o $@
+
+$(USER_BIN): $(USER_ELF)
+	$(OBJCOPY) -O binary $< $@
+
+$(USER_BINARY_O): $(USER_BIN)
+	cd $(BUILD_DIR) && $(OBJCOPY) -I binary -O elf32-i386 -B i386 user_test.bin user_test_binary.o
+
+$(KERNEL_ELF): $(KERNEL_C_OBJECTS) $(KERNEL_ASM_OBJECTS) $(USER_BINARY_O)
+	mkdir -p $(dir $@)
+	$(LD) -m elf_i386 -T $(KERNEL_LINKER) \
+		$(KERNEL_ENTRY_OBJECT) \
+		$(KERNEL_C_OBJECTS) \
+		$(filter-out $(KERNEL_ENTRY_OBJECT),$(KERNEL_ASM_OBJECTS)) \
+		$(USER_BINARY_O) \
+		-o $@
+
+$(KERNEL_BIN): $(KERNEL_ELF)
+	$(OBJCOPY) -O binary $< $@
+
+$(KERNEL_IMG): $(BOOTLOADER) $(KERNEL_BIN)
+	dd if=/dev/zero of=$@ bs=512 count=20480
+	dd if=$(BOOTLOADER) of=$@ conv=notrunc
+	dd if=$(KERNEL_BIN) of=$@ seek=1 conv=notrunc
+
+run: $(KERNEL_IMG)
+	qemu-system-i386 -drive format=raw,file=$(KERNEL_IMG)
 
 clean:
-	rm -f *.o
-	rm -f *.bin
-	rm -f *.elf
-	rm -f *.lst
-	rm -f *.debug
+	rm -rf $(BUILD_DIR)
 	
