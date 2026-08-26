@@ -1,32 +1,38 @@
 #include "fs.h"
 
-bool fs_read_block(uint32_t block, void* buffer) {
-  uint32_t sector = FS_START_BLOCK + block;
+//NOTE POTENTIALLY NEED MEMSET AND MEMCPY FUNCTIONS INSTEAD OF EMBEDDING LOOPS, i make a note instead of doing this because
+//it would probably be better to make a general C file for this to be used throughout the whole kernel
+//
+//
+//tried refactoring code to use uin32_t instead of signed integers, 
+
+bool fs_read_block(uint32_t block_num, void* buffer) {
+  uint32_t sector = FS_START_BLOCK + block_num;
   return ata_read_sector(sector, buffer);
 }
 
-bool fs_write_block(uint32_t block, const void* buffer) {
-  uint32_t sector = FS_START_BLOCK + block;
+bool fs_write_block(uint32_t block_num, const void* buffer) {
+  uint32_t sector = FS_START_BLOCK + block_num;
   return ata_write_sector(sector, buffer);
 }
 
 bool fs_write_superblock(const fs_superblock_t* superblock) {
   uint8_t buffer[FS_BLOCK_SIZE];
-  uint16_t i;
+  size_t i;
 
   for (i = 0; i < FS_BLOCK_SIZE; i++) buffer[i] = 0x00;
 
   for (i = 0; i < sizeof(fs_superblock_t); i++) 
     buffer[i] = ((uint8_t*)(superblock))[i];
 
-  return fs_write_block(FS_SUPERBLOCK, (void*)buffer);
+  return fs_write_block(FS_SUPERBLOCK, buffer);
 }
 
 bool fs_read_superblock(fs_superblock_t* superblock) {
   uint8_t buffer[FS_BLOCK_SIZE];
-  uint16_t i;
+  size_t i;
 
-  if (!fs_read_block(FS_SUPERBLOCK, (void*)buffer))
+  if (!fs_read_block(FS_SUPERBLOCK, buffer))
     return false;
 
   for(i = 0; i < sizeof(fs_superblock_t); i++)
@@ -42,16 +48,16 @@ bool fs_format() {
   fs_superblock_t superblock;
   fs_inode_t root_inode;
   uint8_t buffer[FS_BLOCK_SIZE];
-  uint16_t i;
+  size_t i;
 
   superblock.magic = FS_MAGIC;
   superblock.block_size = FS_BLOCK_SIZE;
 
-  superblock.total_blocks = 1000;
+  superblock.total_blocks = FS_TOTAL_BLOCKS;
   superblock.bitmap_start = FS_BITMAP_BLOCK;
   
   superblock.inode_start = FS_INODE_START;
-  superblock.inode_count = 128;
+  superblock.inode_count = FS_TOTAL_INODES;
   superblock.inode_blocks = (superblock.inode_count * sizeof(fs_inode_t) + FS_BLOCK_SIZE - 1) / FS_BLOCK_SIZE;
   superblock.root_inode = FS_ROOT_INODE;
 
@@ -102,7 +108,6 @@ bool fs_format() {
 
   root_inode.type = FS_TYPE_DIRECTORY;
   root_inode.size = 0;
-  root_inode. links = 1;
   root_inode.blocks[0] = root_block;
 
   if (!fs_write_inode(0, &root_inode))
@@ -126,7 +131,7 @@ int32_t fs_alloc_block() {
   if (!fs_read_block(superblock.bitmap_start, buffer))
     return -1;
 
-  uint32_t i;
+  size_t i;
   for (i = 0; i < superblock.total_blocks; i++) {
     uint32_t is_reserved = (buffer[i / 8] & (1 << (i % 8)));
     if (!is_reserved) {
@@ -139,8 +144,10 @@ int32_t fs_alloc_block() {
     return -1;
 
   superblock.free_blocks--;
-  fs_write_superblock(&superblock);
-  fs_write_block(superblock.bitmap_start, buffer);
+  if (!fs_write_superblock(&superblock))
+    return -1;
+  if (!fs_write_block(superblock.bitmap_start, buffer))
+    return -1;
   return i;
 }
 
@@ -163,21 +170,24 @@ bool fs_free_block(uint32_t block) {
   if (!fs_write_block(superblock.bitmap_start, buffer))
     return false;
 
+  if (!fs_write_superblock(&superblock))
+    return false;
+
   return true;
 }
 
-bool fs_read_inode(uint32_t inode_number, fs_inode_t* inode) {
+bool fs_read_inode(uint32_t inode_num, fs_inode_t* inode) {
   uint8_t buffer[FS_BLOCK_SIZE];
   fs_superblock_t superblock;
   if (!fs_read_superblock(&superblock))
     return false;
 
-  if (inode_number >= superblock.inode_count)
+  if (inode_num >= superblock.inode_count)
     return false;
 
   uint32_t inodes_per_block = FS_BLOCK_SIZE / sizeof(fs_inode_t);
-  uint32_t block_offset = inode_number / inodes_per_block;
-  uint32_t inode_offset = inode_number % inodes_per_block;
+  uint32_t block_offset = inode_num / inodes_per_block;
+  uint32_t inode_offset = inode_num % inodes_per_block;
 
   uint32_t block = superblock.inode_start + block_offset;
 
@@ -190,19 +200,19 @@ bool fs_read_inode(uint32_t inode_number, fs_inode_t* inode) {
   return true;
 }
 
-bool fs_write_inode(uint32_t inode_number, const fs_inode_t* inode) {
+bool fs_write_inode(uint32_t inode_num, const fs_inode_t* inode) {
   fs_superblock_t superblock;
   uint8_t buffer[FS_BLOCK_SIZE];
 
   if (!fs_read_superblock(&superblock))
     return false;
 
-  if (inode_number >= superblock.inode_count)
+  if (inode_num >= superblock.inode_count)
     return false;
 
   uint32_t inodes_per_block = FS_BLOCK_SIZE / sizeof(fs_inode_t);
-  uint32_t block_offset = inode_number / inodes_per_block;
-  uint32_t inode_offset = inode_number % inodes_per_block;
+  uint32_t block_offset = inode_num / inodes_per_block;
+  uint32_t inode_offset = inode_num % inodes_per_block;
 
   uint32_t block = superblock.inode_start + block_offset;
 
@@ -225,16 +235,15 @@ int32_t fs_alloc_inode(uint8_t type) {
   if (!fs_read_superblock(&superblock))
     return -1;
 
-  for (uint32_t i = 0; i < superblock.inode_count; i++) {
+  for (size_t i = 0; i < superblock.inode_count; i++) {
     if (!fs_read_inode(i, &inode))
       return -1;
 
     if (inode.type == FS_TYPE_FREE) {
       inode.type = type;
       inode.size = 0;
-      inode.links = 1;
 
-      for (int j = 0; j < 10; j++)
+      for (size_t j = 0; j < FS_INODE_MAX_BLOCKS; j++)
         inode.blocks[j] = 0;
 
       if (!fs_write_inode(i, &inode))
@@ -251,20 +260,23 @@ int32_t fs_alloc_inode(uint8_t type) {
   return -1;
 }
 
-bool fs_free_inode(uint32_t inode_number) {
+bool fs_free_inode(uint32_t inode_num) {
   fs_superblock_t superblock;
   fs_inode_t inode;
+  bool failure = false;
 
   if (!fs_read_superblock(&superblock))
     return false;
 
-  if (!fs_read_inode(inode_number, &inode))
+  if (!fs_read_inode(inode_num, &inode))
     return false;
 
-  for (int i = 0; i < FS_INODE_MAX_BLOCKS; i++) {
+  for (size_t i = 0; i < FS_INODE_MAX_BLOCKS; i++) {
     if (inode.blocks[i] != 0) {
+      //need a variable to represent failure, this is becuase we don't wanna return halfway though writing
+      //on a failure because this will corrupt the filesystem.
       if (!fs_free_block(inode.blocks[i]))
-        return false;
+        failure = true;
 
       inode.blocks[i] = 0;
     }
@@ -272,10 +284,12 @@ bool fs_free_inode(uint32_t inode_number) {
 
   inode.type = FS_TYPE_FREE;
   inode.size = 0;
-  inode.links = 0;
 
-  if (!fs_write_inode(inode_number, &inode))
+  if (!fs_write_inode(inode_num, &inode))
     return false;
+
+  if (failure)
+    return true;
 
   superblock.free_inodes++;
 
@@ -285,16 +299,16 @@ bool fs_free_inode(uint32_t inode_number) {
   return true;
 }
 
-int32_t fs_find_directory_entry(uint32_t directory_inode, const char* name) {
+int32_t fs_find_directory_entry(uint32_t directory_inode_num, const char* name) {
   fs_inode_t directory;
   uint8_t buffer[FS_BLOCK_SIZE];
 
-  if (!fs_read_inode(directory_inode, &directory))
+  if (!fs_read_inode(directory_inode_num, &directory))
     return -1;
 
   uint32_t entries_per_block = FS_BLOCK_SIZE / sizeof(fs_directory_entry_t);
 
-  for (int i = 0; i < FS_INODE_MAX_BLOCKS; i++) {
+  for (size_t i = 0; i < FS_INODE_MAX_BLOCKS; i++) {
     if (directory.blocks[i] == 0)
       break;
 
@@ -307,7 +321,7 @@ int32_t fs_find_directory_entry(uint32_t directory_inode, const char* name) {
       if (entries[j].inode == 0) 
         continue;
 
-      int k = 0;
+      size_t k = 0;
 
       while (
         name[k] != '\0' &&
@@ -323,30 +337,32 @@ int32_t fs_find_directory_entry(uint32_t directory_inode, const char* name) {
   return -1;
 }
 
-bool fs_add_directory_entry(uint32_t directory_inode, uint32_t inode_number, const char* name) {
+bool fs_add_directory_entry(uint32_t directory_inode_num, uint32_t inode_num, const char* name) {
   fs_inode_t directory;
   uint8_t buffer[FS_BLOCK_SIZE];
 
-  if (!fs_read_inode(directory_inode, &directory))
+  if (!fs_read_inode(directory_inode_num, &directory))
     return false;
 
   uint32_t entries_per_block = FS_BLOCK_SIZE / sizeof(fs_directory_entry_t);
    
-  for (int i = 0; i < FS_INODE_MAX_BLOCKS; i++) {
-    //block is free so allocate the block
+  for (size_t i = 0; i < FS_INODE_MAX_BLOCKS; i++) {
+    //no block is assigned so allocate a block
     if (directory.blocks[i] == 0) {
-      int32_t block = fs_alloc_block();
+      int32_t block_num = fs_alloc_block();
 
-      if (block < 0)
+      if (block_num < 0)
         return false;
 
-      directory.blocks[i] = block;
+      directory.blocks[i] = block_num;
 
-      for (int j = 0; j < FS_BLOCK_SIZE; j++)
+      for (size_t j = 0; j < FS_BLOCK_SIZE; j++)
         buffer[j] = 0;
 
-      if (!fs_write_block(block, (void*)buffer))
+      if (!fs_write_block(block_num, buffer)) {
+        fs_free_block(block_num);
         return false;
+      }
     }
     
     if (!fs_read_block(directory.blocks[i], buffer))
@@ -358,12 +374,12 @@ bool fs_add_directory_entry(uint32_t directory_inode, uint32_t inode_number, con
     //block loop, if free, allocate it accordingly and then return true
     for (uint32_t j = 0; j < entries_per_block; j++) {
       if (entries[j].inode == 0) {
-        entries[j].inode = inode_number;
+        entries[j].inode = inode_num;
 
-        for (int k = 0; k < FS_FILENAME_LENGTH; k++)
+        for (size_t k = 0; k < FS_FILENAME_LENGTH; k++)
           entries[j].name[k] = 0;
 
-        for (int k = 0; k < FS_FILENAME_LENGTH - 1 && name[k] != '\0'; k++) {
+        for (size_t k = 0; k < FS_FILENAME_LENGTH - 1 && name[k] != '\0'; k++) {
           entries[j].name[k] = name[k]; 
         }
 
@@ -372,7 +388,7 @@ bool fs_add_directory_entry(uint32_t directory_inode, uint32_t inode_number, con
 
         directory.size += sizeof(fs_directory_entry_t);
 
-        if (!fs_write_inode(directory_inode, &directory))
+        if (!fs_write_inode(directory_inode_num, &directory))
           return false;
 
         return true;
@@ -382,16 +398,16 @@ bool fs_add_directory_entry(uint32_t directory_inode, uint32_t inode_number, con
   return false;
 }
 
-bool fs_remove_directory_entry(uint32_t directory_inode, const char* name) {
+bool fs_remove_directory_entry(uint32_t directory_inode_num, const char* name) {
   fs_inode_t directory;
   uint8_t buffer[FS_BLOCK_SIZE];
 
-  if(!fs_read_inode(directory_inode, &directory))
+  if(!fs_read_inode(directory_inode_num, &directory))
     return false;
 
   uint32_t entries_per_block = FS_BLOCK_SIZE / sizeof(fs_directory_entry_t);
 
-  for (int i = 0; i < FS_INODE_MAX_BLOCKS; i++) {
+  for (size_t i = 0; i < FS_INODE_MAX_BLOCKS; i++) {
     if (directory.blocks[i] == 0)
       break;
 
@@ -404,7 +420,7 @@ bool fs_remove_directory_entry(uint32_t directory_inode, const char* name) {
       if (entries[j].inode == 0)
         continue;
 
-      int k = 0;
+      size_t k = 0;
 
       while (name[k] != '\0' && 
         entries[j].name[k] != '\0' &&
@@ -421,7 +437,7 @@ bool fs_remove_directory_entry(uint32_t directory_inode, const char* name) {
 
         directory.size -= sizeof(fs_directory_entry_t);
 
-        if (!fs_write_inode(directory_inode, &directory))
+        if (!fs_write_inode(directory_inode_num, &directory))
           return false;
 
         return true;
@@ -431,8 +447,8 @@ bool fs_remove_directory_entry(uint32_t directory_inode, const char* name) {
   return false;
 }
 
-int32_t fs_create_file(uint32_t directory_inode, const char* name) {
-  if (fs_find_directory_entry(directory_inode, name) >= 0)
+int32_t fs_create_file(uint32_t directory_inode_num, const char* name) {
+  if (fs_find_directory_entry(directory_inode_num, name) >= 0)
     return -1;
 
   int32_t file_inode = fs_alloc_inode(FS_TYPE_FILE);
@@ -440,7 +456,7 @@ int32_t fs_create_file(uint32_t directory_inode, const char* name) {
   if (file_inode < 0)
     return -1;
 
-  if (!fs_add_directory_entry(directory_inode, file_inode, name)) {
+  if (!fs_add_directory_entry(directory_inode_num, file_inode, name)) {
     fs_free_inode(file_inode);
     return -1;
   }
@@ -448,60 +464,65 @@ int32_t fs_create_file(uint32_t directory_inode, const char* name) {
   return file_inode;
 }
 
-int32_t fs_create_directory(uint32_t parent_inode, const char* name) {
-  if (fs_find_directory_entry(parent_inode, name) >= 0)
+int32_t fs_create_directory(uint32_t parent_inode_num, const char* name) {
+  if (fs_find_directory_entry(parent_inode_num, name) >= 0)
     return -1;
 
-  int32_t dir_inode_number = fs_alloc_inode(FS_TYPE_DIRECTORY);
+  int32_t dir_inode_num = fs_alloc_inode(FS_TYPE_DIRECTORY);
 
-  if (dir_inode_number < 0)
+  if (dir_inode_num < 0)
     return -1;
 
-  int32_t block = fs_alloc_block();
+  int32_t block_num = fs_alloc_block();
 
-  if (block < 0) {
-    fs_free_inode(dir_inode_number);
+  if (block_num < 0) {
+    fs_free_inode(dir_inode_num);
     return -1;
   }
 
   fs_inode_t dir_inode;
 
-  if (!fs_read_inode(dir_inode_number, &dir_inode))
-    return -1;
+  if (!fs_read_inode(dir_inode_num, &dir_inode))
+    goto fail;
 
-  for(int i = 0; i < FS_INODE_MAX_BLOCKS; i++)
+  for(size_t i = 0; i < FS_INODE_MAX_BLOCKS; i++)
     dir_inode.blocks[i] = 0;
 
-  dir_inode.blocks[0] = block;
+  dir_inode.blocks[0] = block_num;
   dir_inode.size = 0;
 
   uint8_t buffer[FS_BLOCK_SIZE];
 
   //clear only block
-  for (int i = 0; i < FS_BLOCK_SIZE; i++) 
+  for (size_t i = 0; i < FS_BLOCK_SIZE; i++) 
     buffer[i] = 0;
 
-  if (!fs_write_block(block, buffer))
-    return -1;
+  if (!fs_write_block(block_num, buffer))
+    goto fail;
 
-  if (!fs_write_inode(dir_inode_number, &dir_inode))
-    return -1;
+  if (!fs_write_inode(dir_inode_num, &dir_inode))
+    goto fail;
 
-  if (!fs_add_directory_entry(parent_inode, dir_inode_number, name))
-    return -1;
+  if (!fs_add_directory_entry(parent_inode_num, dir_inode_num, name))
+    goto fail;
 
-  return dir_inode_number;
+  return dir_inode_num;
+
+fail:
+  fs_free_block(block_num);
+  fs_free_inode(dir_inode_num);
+  return -1;
 }
 
-int32_t fs_read_file(uint32_t file_inode_number, void* read_buffer, uint32_t size, uint32_t offset) {
+int32_t fs_read_file(uint32_t file_inode_num, void* read_buffer, uint32_t size, uint32_t offset) {
   fs_inode_t file_inode;
   uint8_t buffer[FS_BLOCK_SIZE];
 
-  if (!fs_read_inode(file_inode_number, &file_inode))
+  if (!fs_read_inode(file_inode_num, &file_inode))
     return -1;
 
   if (offset >= file_inode.size)
-    return -1;
+    return 0; //EOF should return 0 bytes instead of an error
 
   if (offset + size > file_inode.size)
     size = file_inode.size - offset;
@@ -516,7 +537,7 @@ int32_t fs_read_file(uint32_t file_inode_number, void* read_buffer, uint32_t siz
     uint32_t block_index = position / FS_BLOCK_SIZE;
     uint32_t block_offset = position % FS_BLOCK_SIZE;
 
-    if (block_index >= 10)
+    if (block_index >= FS_INODE_MAX_BLOCKS)
       break;
 
     if (!fs_read_block(file_inode.blocks[block_index], buffer))
@@ -537,12 +558,12 @@ int32_t fs_read_file(uint32_t file_inode_number, void* read_buffer, uint32_t siz
   return bytes_read;
 }
 
-int32_t fs_write_file(uint32_t inode_number, const void* write_buffer, uint32_t size, uint32_t offset) {
+int32_t fs_write_file(uint32_t inode_num, const void* write_buffer, uint32_t size, uint32_t offset) {
   fs_inode_t file_inode;
 
   uint8_t buffer[FS_BLOCK_SIZE];
 
-  if (!fs_read_inode(inode_number, &file_inode))
+  if (!fs_read_inode(inode_num, &file_inode))
     return -1;
 
   const uint8_t* source = (const uint8_t*)write_buffer;
@@ -566,7 +587,7 @@ int32_t fs_write_file(uint32_t inode_number, const void* write_buffer, uint32_t 
 
       file_inode.blocks[block_index] = block;
 
-      for (int i = 0; i < FS_BLOCK_SIZE; i++)
+      for (size_t i = 0; i < FS_BLOCK_SIZE; i++)
         buffer[i] = 0;
     } else {
       if (!fs_read_block(file_inode.blocks[block_index], buffer))
@@ -590,22 +611,23 @@ int32_t fs_write_file(uint32_t inode_number, const void* write_buffer, uint32_t 
   if (offset + bytes_written > file_inode.size)
     file_inode.size = offset + bytes_written;
 
-  if (!fs_write_inode(inode_number, &file_inode))
+  if (!fs_write_inode(inode_num, &file_inode))
     return -1;
 
   return bytes_written;
 }
 
+//is this a useless function?
 bool fs_delete_file(uint32_t directory_inode, const char* name) {
-  int32_t inode_number = fs_find_directory_entry(directory_inode, name);
+  int32_t inode_num = fs_find_directory_entry(directory_inode, name);
 
-  if (inode_number < 0)
+  if (inode_num < 0)
     return false;
 
   if (!fs_remove_directory_entry(directory_inode, name))
     return false;
 
-  if (!fs_free_inode(inode_number))
+  if (!fs_free_inode(inode_num))
     return false;
 
   return true;
