@@ -1,4 +1,2 @@
-*.log
-*.elf
-*.o
-
+build/
+compile_commands.json

@@ -84,7 +84,7 @@ $(KERNEL_IMG): $(BOOTLOADER) $(KERNEL_BIN)
 	dd if=$(KERNEL_BIN) of=$@ seek=1 conv=notrunc
 
 run: $(KERNEL_IMG)
-	qemu-system-i386 -drive format=raw,file=$(KERNEL_IMG)
+	qemu-system-i386 -drive format=raw,file=$(KERNEL_IMG) #-s -S
 
 clean:
 	rm -rf $(BUILD_DIR)

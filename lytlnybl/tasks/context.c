@@ -50,11 +50,10 @@ void context_switch(process_t* old_process, process_t* new_process, registers_t*
     current_process = new_process;
     if (old_process->state == PROCESS_RUNNING) {
         old_process->state = PROCESS_READY;
-    } else if (old_process->state == PROCESS_TERMINATED) {
-        destroy_process(old_process);    
-    }
-    new_process->state = PROCESS_RUNNING;
+    } 
+    
     save_context(old_process, regs);
+    new_process->state = PROCESS_RUNNING;
 
     return_to_user = (new_process->type == PROCESS_USER);
 
@@ -63,6 +62,10 @@ void context_switch(process_t* old_process, process_t* new_process, registers_t*
         set_cr3((uintptr_t)new_process->page_directory);
     } else if (new_process->type == PROCESS_KERNEL) {
         set_cr3((uintptr_t)kernel_directory);
+    }
+
+    if (old_process->state == PROCESS_TERMINATED) {
+        destroy_process(old_process);    
     }
 
     load_context(new_process, regs);
