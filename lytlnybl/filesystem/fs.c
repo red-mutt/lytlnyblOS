@@ -99,7 +99,7 @@ bool fs_format(void) {
   root_inode.size = 0;
   root_inode.blocks[0] = root_block;
 
-  if (!fs_write_inode(0, &root_inode))
+  if (!fs_write_inode(superblock.root_inode, &root_inode))
     return false;
 
   //empty root dir block
@@ -120,7 +120,7 @@ int32_t fs_alloc_block(void) {
     return -1;
 
   size_t i;
-  for (i = 0; i < superblock.total_blocks; i++) {
+  for (i = 0; i < superblock.total_blocks && i < (FS_BLOCK_SIZE * 8); i++) {
     uint32_t is_reserved = (buffer[i / 8] & (1 << (i % 8)));
     if (!is_reserved) {
       buffer[i / 8] |= (1 << (i % 8));
@@ -131,10 +131,10 @@ int32_t fs_alloc_block(void) {
   if (i == superblock.total_blocks)
     return -1;
 
+  if (!fs_write_block(superblock.bitmap_start, buffer))
+    return -1;
   superblock.free_blocks--;
   if (!fs_write_superblock(&superblock))
-    return -1;
-  if (!fs_write_block(superblock.bitmap_start, buffer))
     return -1;
   return i;
 }
@@ -145,8 +145,13 @@ bool fs_free_block(uint32_t block) {
 
   if (!fs_read_superblock(&superblock))
     return false;
+
+  if (block >= superblock.total_blocks)
+    return false;
+
   if (!fs_read_block(superblock.bitmap_start, buffer))
     return false;
+
 
   uint32_t byte = block / 8;
   uint32_t bit = block % 8;
