@@ -1,0 +1,594 @@
+#include "filesystem/fs.h"
+#include "kernel/drivers/ata.h"
+#include "kernel/kernel_utils.h"
+
+//tried refactoring code to use uin32_t instead of signed integers, 
+
+bool fs_read_block(uint32_t block_num, void* buffer) {
+  uint32_t sector = FS_START_BLOCK + block_num;
+  return ata_read_sector(sector, buffer);
+}
+
+bool fs_write_block(uint32_t block_num, const void* buffer) {
+  uint32_t sector = FS_START_BLOCK + block_num;
+  return ata_write_sector(sector, buffer);
+}
+
+bool fs_write_superblock(const fs_superblock_t* superblock) {
+  uint8_t buffer[FS_BLOCK_SIZE];
+
+  memset(buffer, 0, FS_BLOCK_SIZE);
+
+  memcpy(buffer,superblock, sizeof(fs_superblock_t));
+
+  return fs_write_block(FS_SUPERBLOCK, buffer);
+}
+
+bool fs_read_superblock(fs_superblock_t* superblock) {
+  uint8_t buffer[FS_BLOCK_SIZE];
+
+  if (!fs_read_block(FS_SUPERBLOCK, buffer))
+    return false;
+
+  memcpy(superblock, buffer, sizeof(fs_superblock_t));
+
+  if (superblock->magic != FS_MAGIC)
+    return false;
+
+  return true;
+}
+
+bool fs_format(void) {
+  fs_superblock_t superblock;
+  fs_inode_t root_inode;
+  uint8_t buffer[FS_BLOCK_SIZE];
+
+  superblock.magic = FS_MAGIC;
+  superblock.block_size = FS_BLOCK_SIZE;
+
+  superblock.total_blocks = FS_TOTAL_BLOCKS;
+  superblock.bitmap_start = FS_BITMAP_BLOCK;
+  
+  superblock.inode_start = FS_INODE_START;
+  superblock.inode_count = FS_TOTAL_INODES;
+  superblock.inode_blocks = (superblock.inode_count * sizeof(fs_inode_t) + FS_BLOCK_SIZE - 1) / FS_BLOCK_SIZE;
+  superblock.root_inode = FS_ROOT_INODE;
+
+  superblock.data_start = superblock.inode_start + superblock.inode_blocks;
+
+  superblock.free_blocks = superblock.total_blocks - superblock.data_start - 1;
+  superblock.free_inodes = superblock.inode_count - 1;
+
+
+  
+  if (!fs_write_superblock(&superblock))
+    return false;
+
+  memset(buffer, 0, FS_BLOCK_SIZE);
+
+  //mark everything other than the data as used (in the bitmap)
+  for (uint32_t block = 0; block < superblock.data_start; block++) {
+    uint32_t byte = block / 8;
+    uint32_t bit = block % 8;
+    buffer[byte] |= (1 << bit);
+  }
+
+  //mark root as used in bitmap
+  uint32_t root_block = superblock.data_start;
+  uint32_t root_byte = root_block / 8;
+  uint32_t root_bit = root_block % 8;
+  buffer[root_byte] |= (1 << root_bit);
+
+  if (!fs_write_block(superblock.bitmap_start, buffer))
+    return false;
+
+  //clear inode table blocks
+  memset(buffer, 0, FS_BLOCK_SIZE);
+  for(
+    uint32_t block = 0;
+    block < superblock.inode_blocks;
+    block++) {
+    if(!fs_write_block(superblock.inode_start + block, buffer))
+      return false; 
+  }
+
+  //set up root inode
+  memset(&root_inode, 0, sizeof(fs_inode_t));
+
+  root_inode.type = FS_TYPE_DIRECTORY;
+  root_inode.size = 0;
+  root_inode.blocks[0] = root_block;
+
+  if (!fs_write_inode(0, &root_inode))
+    return false;
+
+  //empty root dir block
+  memset(buffer, 0, FS_BLOCK_SIZE);
+  if (!fs_write_block(root_block, buffer))
+    return false; 
+
+  return true;
+}
+
+int32_t fs_alloc_block(void) {
+  uint8_t buffer[FS_BLOCK_SIZE];
+  fs_superblock_t superblock;
+
+  if (!fs_read_superblock(&superblock))
+    return -1;
+  if (!fs_read_block(superblock.bitmap_start, buffer))
+    return -1;
+
+  size_t i;
+  for (i = 0; i < superblock.total_blocks; i++) {
+    uint32_t is_reserved = (buffer[i / 8] & (1 << (i % 8)));
+    if (!is_reserved) {
+      buffer[i / 8] |= (1 << (i % 8));
+      break;
+    }
+  }
+
+  if (i == superblock.total_blocks)
+    return -1;
+
+  superblock.free_blocks--;
+  if (!fs_write_superblock(&superblock))
+    return -1;
+  if (!fs_write_block(superblock.bitmap_start, buffer))
+    return -1;
+  return i;
+}
+
+bool fs_free_block(uint32_t block) {
+  uint8_t buffer[FS_BLOCK_SIZE];
+  fs_superblock_t superblock;
+
+  if (!fs_read_superblock(&superblock))
+    return false;
+  if (!fs_read_block(superblock.bitmap_start, buffer))
+    return false;
+
+  uint32_t byte = block / 8;
+  uint32_t bit = block % 8;
+
+  buffer[byte] &= ~(1 << bit);
+
+  superblock.free_blocks++;
+
+  if (!fs_write_block(superblock.bitmap_start, buffer))
+    return false;
+
+  if (!fs_write_superblock(&superblock))
+    return false;
+
+  return true;
+}
+
+bool fs_read_inode(uint32_t inode_num, fs_inode_t* inode) {
+  uint8_t buffer[FS_BLOCK_SIZE];
+  fs_superblock_t superblock;
+  if (!fs_read_superblock(&superblock))
+    return false;
+
+  if (inode_num >= superblock.inode_count)
+    return false;
+
+  uint32_t inodes_per_block = FS_BLOCK_SIZE / sizeof(fs_inode_t);
+  uint32_t block_offset = inode_num / inodes_per_block;
+  uint32_t inode_offset = inode_num % inodes_per_block;
+
+  uint32_t block = superblock.inode_start + block_offset;
+
+  if (!fs_read_block(block, buffer))
+    return false;
+
+  fs_inode_t* inodes = (fs_inode_t*)buffer;
+  *inode = inodes[inode_offset];
+
+  return true;
+}
+
+bool fs_write_inode(uint32_t inode_num, const fs_inode_t* inode) {
+  fs_superblock_t superblock;
+  uint8_t buffer[FS_BLOCK_SIZE];
+
+  if (!fs_read_superblock(&superblock))
+    return false;
+
+  if (inode_num >= superblock.inode_count)
+    return false;
+
+  uint32_t inodes_per_block = FS_BLOCK_SIZE / sizeof(fs_inode_t);
+  uint32_t block_offset = inode_num / inodes_per_block;
+  uint32_t inode_offset = inode_num % inodes_per_block;
+
+  uint32_t block = superblock.inode_start + block_offset;
+
+  if (!fs_read_block(block, buffer))
+    return false;
+
+  fs_inode_t* inodes = (fs_inode_t*)buffer;
+  inodes[inode_offset] = *inode;
+
+  if (!fs_write_block(block, buffer))
+    return false;
+
+  return true;
+}
+
+int32_t fs_alloc_inode(uint8_t type) {
+  fs_superblock_t superblock;
+  fs_inode_t inode;
+
+  if (!fs_read_superblock(&superblock))
+    return -1;
+
+  for (size_t i = 0; i < superblock.inode_count; i++) {
+    if (!fs_read_inode(i, &inode))
+      return -1;
+
+    if (inode.type == FS_TYPE_FREE) {
+      inode.type = type;
+      inode.size = 0;
+
+      memset(inode.blocks, 0, sizeof(inode.blocks));
+
+      if (!fs_write_inode(i, &inode))
+        return -1;
+
+      superblock.free_inodes--;
+
+      if(!fs_write_superblock(&superblock))
+        return -1;
+
+      return i;
+    }
+  }
+  return -1;
+}
+
+bool fs_free_inode(uint32_t inode_num) {
+  fs_superblock_t superblock;
+  fs_inode_t inode;
+  bool failure = false;
+
+  if (!fs_read_inode(inode_num, &inode))
+    return false;
+
+  for (size_t i = 0; i < FS_INODE_MAX_BLOCKS; i++) {
+    if (inode.blocks[i] != 0) {
+      //need a variable to represent failure, this is becuase we don't wanna return halfway though writing
+      //on a failure because this will corrupt the filesystem.
+      if (!fs_free_block(inode.blocks[i]))
+        failure = true;
+
+      inode.blocks[i] = 0;
+    }
+  }
+
+  if (failure)
+    return false;
+
+  inode.type = FS_TYPE_FREE;
+  inode.size = 0;
+
+  if (!fs_write_inode(inode_num, &inode))
+    return false;
+
+  if (!fs_read_superblock(&superblock))
+    return false;
+
+  superblock.free_inodes++;
+
+  if (!fs_write_superblock(&superblock))
+    return false;
+
+  return true;
+}
+
+int32_t fs_find_directory_entry(uint32_t directory_inode_num, const char* name) {
+  fs_inode_t directory;
+  uint8_t buffer[FS_BLOCK_SIZE];
+
+  if (!fs_read_inode(directory_inode_num, &directory))
+    return -1;
+
+  uint32_t entries_per_block = FS_BLOCK_SIZE / sizeof(fs_directory_entry_t);
+
+  for (size_t i = 0; i < FS_INODE_MAX_BLOCKS; i++) {
+    if (directory.blocks[i] == 0)
+      break;
+
+    if (!fs_read_block(directory.blocks[i], buffer))
+      return -1;
+
+    fs_directory_entry_t* entries = (fs_directory_entry_t*)buffer;
+
+    for (uint32_t j = 0; j < entries_per_block; j++) {
+      if (entries[j].inode == 0) 
+        continue;
+
+      if (strcmp(name, entries[j].name) == 0)
+        return entries[j].inode;
+    }
+
+  }
+  return -1;
+}
+
+bool fs_add_directory_entry(uint32_t directory_inode_num, uint32_t inode_num, const char* name) {
+  fs_inode_t directory;
+  uint8_t buffer[FS_BLOCK_SIZE];
+
+  if (!fs_read_inode(directory_inode_num, &directory))
+    return false;
+
+  uint32_t entries_per_block = FS_BLOCK_SIZE / sizeof(fs_directory_entry_t);
+   
+  for (size_t i = 0; i < FS_INODE_MAX_BLOCKS; i++) {
+    //no block is assigned so allocate a block
+    if (directory.blocks[i] == 0) {
+      int32_t block_num = fs_alloc_block();
+
+      if (block_num < 0)
+        return false;
+
+      directory.blocks[i] = block_num;
+
+      memset(buffer, 0, FS_BLOCK_SIZE);
+
+      if (!fs_write_block(block_num, buffer)) {
+        fs_free_block(block_num);
+        return false;
+      }
+    }
+    
+    if (!fs_read_block(directory.blocks[i], buffer))
+      return false;
+
+    fs_directory_entry_t* entries = (fs_directory_entry_t*)buffer;
+
+    //search for free entry indicated by the .inode, if not found, will go to next iteration of 
+    //block loop, if free, allocate it accordingly and then return true
+    for (size_t j = 0; j < entries_per_block; j++) {
+      if (entries[j].inode == 0) {
+        entries[j].inode = inode_num;
+
+        memset(entries[j].name, 0, FS_FILENAME_LENGTH);
+
+        strncpy(entries[j].name, name, FS_FILENAME_LENGTH - 1);
+
+        if (!fs_write_block(directory.blocks[i], buffer))
+          return false;
+
+        directory.size += sizeof(fs_directory_entry_t);
+
+        if (!fs_write_inode(directory_inode_num, &directory))
+          return false;
+
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool fs_remove_directory_entry(uint32_t directory_inode_num, const char* name) {
+  fs_inode_t directory;
+  uint8_t buffer[FS_BLOCK_SIZE];
+
+  if(!fs_read_inode(directory_inode_num, &directory))
+    return false;
+
+  uint32_t entries_per_block = FS_BLOCK_SIZE / sizeof(fs_directory_entry_t);
+
+  for (size_t i = 0; i < FS_INODE_MAX_BLOCKS; i++) {
+    if (directory.blocks[i] == 0)
+      break;
+
+    if (!fs_read_block(directory.blocks[i], buffer))
+      return false;
+
+    fs_directory_entry_t* entries = (fs_directory_entry_t*)buffer;
+
+    for (uint32_t j = 0; j < entries_per_block; j++) {
+
+      if (entries[j].inode == 0)
+        continue;
+
+      if (strcmp(name, entries[j].name) == 0) {
+        //entry to remove found
+        entries[j].inode = 0;
+        
+        if (!fs_write_block(directory.blocks[i], buffer))
+          return false;
+
+        directory.size -= sizeof(fs_directory_entry_t);
+
+        if (!fs_write_inode(directory_inode_num, &directory))
+          return false;
+
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+int32_t fs_create_file(uint32_t directory_inode_num, const char* name) {
+  if (fs_find_directory_entry(directory_inode_num, name) >= 0)
+    return -1;
+
+  int32_t file_inode = fs_alloc_inode(FS_TYPE_FILE);
+
+  if (file_inode < 0)
+    return -1;
+
+  if (!fs_add_directory_entry(directory_inode_num, file_inode, name)) {
+    fs_free_inode(file_inode);
+    return -1;
+  }
+
+  return file_inode;
+}
+
+int32_t fs_create_directory(uint32_t parent_inode_num, const char* name) {
+  if (fs_find_directory_entry(parent_inode_num, name) >= 0)
+    return -1;
+
+  int32_t dir_inode_num = fs_alloc_inode(FS_TYPE_DIRECTORY);
+
+  if (dir_inode_num < 0)
+    return -1;
+
+  int32_t block_num = fs_alloc_block();
+
+  if (block_num < 0) {
+    fs_free_inode(dir_inode_num);
+    return -1;
+  }
+
+  fs_inode_t dir_inode;
+
+  if (!fs_read_inode(dir_inode_num, &dir_inode))
+    goto fail;
+
+  memset(dir_inode.blocks, 0, sizeof(dir_inode.blocks));
+
+  dir_inode.blocks[0] = block_num;
+  dir_inode.size = 0;
+
+  uint8_t buffer[FS_BLOCK_SIZE];
+
+  memset(buffer, 0, FS_BLOCK_SIZE);
+
+  if (!fs_write_block(block_num, buffer))
+    goto fail;
+
+  if (!fs_write_inode(dir_inode_num, &dir_inode))
+    goto fail;
+
+  if (!fs_add_directory_entry(parent_inode_num, dir_inode_num, name))
+    goto fail;
+
+  return dir_inode_num;
+
+fail:
+  fs_free_block(block_num);
+  fs_free_inode(dir_inode_num);
+  return -1;
+}
+
+int32_t fs_read_file(uint32_t file_inode_num, void* read_buffer, uint32_t size, uint32_t offset) {
+  fs_inode_t file_inode;
+  uint8_t buffer[FS_BLOCK_SIZE];
+
+  if (!fs_read_inode(file_inode_num, &file_inode))
+    return -1;
+
+  if (offset >= file_inode.size)
+    return 0; //EOF should return 0 bytes instead of an error
+
+  if (offset + size > file_inode.size)
+    size = file_inode.size - offset;
+
+  uint32_t bytes_read = 0;
+
+  uint8_t* destination = (uint8_t*)read_buffer;
+
+  while (bytes_read < size) {
+    uint32_t position = offset + bytes_read;
+
+    uint32_t block_index = position / FS_BLOCK_SIZE;
+    uint32_t block_offset = position % FS_BLOCK_SIZE;
+
+    if (block_index >= FS_INODE_MAX_BLOCKS)
+      break;
+
+    if (!fs_read_block(file_inode.blocks[block_index], buffer))
+        return -1;
+
+    uint32_t bytes = FS_BLOCK_SIZE - block_offset;
+
+    if (bytes > size - bytes_read)
+      bytes = size - bytes_read;
+
+    memcpy(destination + bytes_read, buffer + block_offset, bytes);
+
+    bytes_read += bytes;
+  }
+
+  return bytes_read;
+}
+
+int32_t fs_write_file(uint32_t inode_num, const void* write_buffer, uint32_t size, uint32_t offset) {
+  fs_inode_t file_inode;
+  uint8_t buffer[FS_BLOCK_SIZE];
+
+  if (!fs_read_inode(inode_num, &file_inode))
+    return -1;
+
+  const uint8_t* source = (const uint8_t*)write_buffer;
+  uint32_t bytes_written = 0;
+
+  while (bytes_written < size) {
+    uint32_t position = offset + bytes_written;
+
+    uint32_t block_index = position / FS_BLOCK_SIZE;
+    uint32_t block_offset = position % FS_BLOCK_SIZE;
+
+    if (block_index >= FS_INODE_MAX_BLOCKS)
+      break;
+
+    //block not allocated, so allocate one and make it free, if else just read block.
+    if (file_inode.blocks[block_index] == 0) {
+      int32_t block = fs_alloc_block();
+
+      if (block < 0)
+        return -1;
+
+      file_inode.blocks[block_index] = block;
+
+      memset(buffer, 0, FS_BLOCK_SIZE);
+    } else {
+      if (!fs_read_block(file_inode.blocks[block_index], buffer))
+          return -1;
+    }
+
+    uint32_t bytes = FS_BLOCK_SIZE - block_offset;
+
+    if (bytes > size - bytes_written)
+      bytes = size - bytes_written;
+
+    memcpy(buffer + block_offset, source + bytes_written, bytes);
+
+    if (!fs_write_block(file_inode.blocks[block_index], buffer))
+      return -1;
+
+    bytes_written += bytes;
+  }
+
+  if (offset + bytes_written > file_inode.size)
+    file_inode.size = offset + bytes_written;
+
+  if (!fs_write_inode(inode_num, &file_inode))
+    return -1;
+
+  return bytes_written;
+}
+
+bool fs_delete_file(uint32_t directory_inode, const char* name) {
+  int32_t inode_num = fs_find_directory_entry(directory_inode, name);
+
+  if (inode_num < 0)
+    return false;
+
+  if (!fs_remove_directory_entry(directory_inode, name))
+    return false;
+
+  if (!fs_free_inode(inode_num))
+    return false;
+
+  return true;
+}
+
