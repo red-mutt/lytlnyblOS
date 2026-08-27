@@ -16,8 +16,9 @@ typedef struct {
 void fs_manager_init(void);
 
 int32_t fs_resolve_path(const char* path);
+uint32_t fs_fd_to_inode(int32_t fd);
 
-int32_t fs_open(const char* name);
+int32_t fs_open(const char* path);
 int32_t fs_close(int fd);
 int32_t fs_read(int fd, void* buffer, uint32_t size);
 int32_t fs_write(int fd, void* buffer, uint32_t size);

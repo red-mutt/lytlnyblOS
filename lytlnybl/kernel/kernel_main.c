@@ -64,6 +64,7 @@ void kernel_main(void)
     
     //userspace testing
 
+    /*
     void* code_frame = alloc_frame();
 
     extern unsigned char _binary_user_test_bin_start[];
@@ -85,6 +86,7 @@ void kernel_main(void)
         (uintptr_t)code_frame, 
         PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER
     );
+    */
 
     /*
     //map vga so process ring 3 can access
@@ -95,10 +97,6 @@ void kernel_main(void)
         PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER
     );
     */
-
-
-    
-    init_ata();
 
     uint8_t test_write[512];
     uint8_t test_read[512];
@@ -121,14 +119,13 @@ void kernel_main(void)
             break;
         }
     }
-    // FILE SYSTEM TESTS
-    
-    if (!fs_format())
-      vga_text_writeline(&terminal, "failed formating");
 
+    // FILE SYSTEM TESTS    
+
+    init_ata();
     fs_mkdir("/dir1");
     fs_mkdir("/dir2");
-    fs_touch("file.txt");
+    fs_touch("/file.txt");
 
     fs_ls("/");
     fs_touch("/dir1/notes.txt");

@@ -54,6 +54,7 @@ bool fs_format(void) {
 
   superblock.data_start = superblock.inode_start + superblock.inode_blocks;
 
+  // -1 for root dir remember
   superblock.free_blocks = superblock.total_blocks - superblock.data_start - 1;
   superblock.free_inodes = superblock.inode_count - 1;
 

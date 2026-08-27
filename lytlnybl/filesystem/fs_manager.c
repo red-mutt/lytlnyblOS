@@ -285,3 +285,8 @@ void fs_ls(const char* path) {
   }
   vga_text_writeline(&terminal, "");
 }
+
+uint32_t fs_fd_to_inode(int32_t fd) {
+  fd -= FS_FD_OFFSET;
+  return open_files[fd].inode; 
+}
