@@ -10,6 +10,7 @@
 #include "filesystem/fs_manager.h"
 #include "kernel/drivers/ata.h"
 #include "kernel/mappings.h"
+#include "tasks/loader.h"
 
 #include <stdint.h>
 
@@ -132,6 +133,7 @@ void kernel_main(void)
     fs_ls("/dir1");
     fs_rm("/dir2");
     fs_ls("/");
+    fs_ls("/bin");
 
     int32_t fd = fs_open("/dir1/notes.txt");
 
@@ -142,9 +144,11 @@ void kernel_main(void)
     char recv[18];
     fs_read(fd, (void*)recv, 17);  
 
+
     recv[17] = '\0';
     vga_text_writeline(&terminal, recv);
 
+    load_program("/bin/user_test");
 
     for (;;);
 }
