@@ -9,6 +9,7 @@
 #include "tasks/context.h"
 #include "tasks/scheduler.h"
 #include "kernel/kernel_utils.h"
+#include "filesystem/fs_manager.h"
 
 extern vga_text terminal;
 
@@ -181,6 +182,23 @@ void syscall_handler(registers_t* regs) {
             regs->eax = current_process->user_heap_end;
 
 
+            break;
+        case SYSCALL_FSOPS:
+            char* path = (char*)regs->ecx; 
+            switch (regs->ebx) {
+                case FS_LS:
+                    fs_ls(path);
+                    break;
+                case FS_MKDIR:
+                    fs_mkdir(path);
+                    break;
+                case FS_TOUCH:
+                    fs_touch(path);
+                    break;
+                case FS_RM:
+                    fs_rm(path);
+                    break;
+            }
             break;
         default:
             vga_text_writeline(&terminal, "syscall not found");

@@ -201,9 +201,6 @@ void keyboard_handler () {
     c[1] = '\0';
 
     switch (c[0]) {
-        case '\n':
-            vga_text_writeline(&terminal, "");
-            break;
         case 27: 
             vga_text_clear(&terminal);
             break;
@@ -213,6 +210,7 @@ void keyboard_handler () {
         case '\t':
             vga_text_write(&terminal, "    ");
             break;
+        case '\n':
         default:
             if (shift_pressed) {
                 c[0] = shift_keymap[scancode];
@@ -232,7 +230,7 @@ void keyboard_handler () {
                     ((char*)(buffer))[traversal_process->reading_state.count++] = c[0];
                     set_cr3((uintptr_t)kernel_directory);
 
-                    if (traversal_process->reading_state.count >= size) {
+                    if (traversal_process->reading_state.count >= size || c[0] == '\n') {
                         traversal_process->reading_state.count = 0;
                         traversal_process->reading_state.size = 0;
                         traversal_process->state = PROCESS_READY;

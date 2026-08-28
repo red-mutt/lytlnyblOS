@@ -148,6 +148,7 @@ void kernel_main(void)
     recv[17] = '\0';
     vga_text_writeline(&terminal, recv);
 
+    load_program("/bin/shell");
     load_program("/bin/user_test");
 
     for (;;);

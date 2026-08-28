@@ -2,11 +2,12 @@
 #define SHELL_H
 
 #include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
 
-typedef struct {
-  uint32_t last_status;
-  uint32_t running;
-  uint32_t interactive;
-} Shell;
+char** tokenize_line(const char* line, size_t *count_out);
+bool execute_command(char** words, size_t word_count); 
+
+
 
 #endif

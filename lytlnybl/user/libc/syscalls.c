@@ -29,3 +29,7 @@ void* sbrk (intptr_t increment) {
   return (void*)syscall(SYSCALL_SBRK, increment, 0, 0);
 }
 
+void fs_ops(uint8_t operation, char* path) {
+  syscall(SYSCALL_FSOPS, operation, (uint32_t)path, 0);
+}
+
