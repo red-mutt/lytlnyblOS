@@ -111,6 +111,15 @@ void syscall_handler(registers_t* regs) {
     size_t count;
     switch (regs->eax) {
         case SYSCALL_EXIT:
+            // wake up parent
+            process_t* parent = find_process_by_pid(current_process->parent_pid);
+
+            if (parent != NULL && parent->pid_waiting_for == current_process->pid) {
+                parent->pid_waiting_for = 0;
+                parent->state = PROCESS_READY;
+            }
+
+            //exit
             current_process->state = PROCESS_TERMINATED;
             context_switch(current_process, get_next_process(), regs);
             break;
@@ -208,7 +217,13 @@ void syscall_handler(registers_t* regs) {
                     fs_rm(path);
                     break;
                 case FS_RUN:
-                    load_program(path);
+                    process_t* child = load_program(path);
+
+                    child->parent_pid = current_process->pid;
+
+                    current_process->pid_waiting_for = child->pid;
+                    current_process->state = PROCESS_BLOCKED;
+                    context_switch(current_process, get_next_process(), regs);
                     break;
             }
             break;

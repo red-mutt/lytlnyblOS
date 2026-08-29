@@ -49,6 +49,9 @@ typedef struct {
 } process_reading_state_t;
 
 typedef struct process {
+    uint32_t pid_waiting_for;
+    uint32_t parent_pid;
+
     uintptr_t user_heap_end;
     uint32_t heap_pages_allocated;
 
