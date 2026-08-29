@@ -58,6 +58,7 @@ void _start(void)
     ptr3[6] = 'o';
 
     puts(ptr3);
+    printf("\n");
 
     free(ptr3);
 

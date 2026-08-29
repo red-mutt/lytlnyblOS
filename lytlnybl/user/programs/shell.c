@@ -24,7 +24,7 @@ void start(void) {
 
     //Print
     if (!execute_command(words, word_count)) {
-      printf("command failed");
+      printf("command failed\n");
     }
 
     //CLEANUP

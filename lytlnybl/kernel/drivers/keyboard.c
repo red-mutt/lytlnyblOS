@@ -204,41 +204,49 @@ void keyboard_handler () {
         case 27: 
             vga_text_clear(&terminal);
             break;
-        case '\b':
-            vga_text_backspace(&terminal);
-            break;
         case '\t':
             vga_text_write(&terminal, "    ");
             break;
+        case '\b':
+            vga_text_backspace(&terminal);
         case '\n':
         default:
             if (shift_pressed) {
-                c[0] = shift_keymap[scancode];
+              c[0] = shift_keymap[scancode];
             }
-            vga_text_write(&terminal, c);
+            if (c[0] != '\b')
+              vga_text_write(&terminal, c);
             if (!c[0]) return;
 
             process_t* traversal_process = process_head;
             while (traversal_process) {
-                if (traversal_process->state == PROCESS_BLOCKED && traversal_process->reading_state.size > 0) {
-                    void* buffer = traversal_process->reading_state.buffer;
-                    uint32_t size = traversal_process->reading_state.size;
+              if (traversal_process->state == PROCESS_BLOCKED && traversal_process->reading_state.size > 0) {
+                void* buffer = traversal_process->reading_state.buffer;
+                uint32_t size = traversal_process->reading_state.size;
 
-                    //quite a crude way of doing this, (really only the context switcher should 
-                    //be changing cr3), but it works
-                    set_cr3((uintptr_t)traversal_process->page_directory);
-                    ((char*)(buffer))[traversal_process->reading_state.count++] = c[0];
-                    set_cr3((uintptr_t)kernel_directory);
-
-                    if (traversal_process->reading_state.count >= size || c[0] == '\n') {
-                        traversal_process->reading_state.count = 0;
-                        traversal_process->reading_state.size = 0;
-                        traversal_process->state = PROCESS_READY;
-                    }
-                    
+                if (c[0] == '\b') {
+                  traversal_process->reading_state.count--;
+                  set_cr3((uintptr_t)traversal_process->page_directory);
+                  ((char*)(buffer))[traversal_process->reading_state.count] = '\0';
+                  set_cr3((uintptr_t)kernel_directory);
+                } else {
+                  //quite a crude way of doing this, (really only the context switcher should 
+                  //be changing cr3), but it works
+                  set_cr3((uintptr_t)traversal_process->page_directory);
+                  ((char*)(buffer))[traversal_process->reading_state.count++] = c[0];
+                  set_cr3((uintptr_t)kernel_directory);
                 }
-                
-                traversal_process = traversal_process->next;
+
+
+                if (traversal_process->reading_state.count >= size || c[0] == '\n') {
+                  traversal_process->reading_state.count = 0;
+                  traversal_process->reading_state.size = 0;
+                  traversal_process->state = PROCESS_READY;
+                }
+
+              }
+
+              traversal_process = traversal_process->next;
             }
             break;
     }
