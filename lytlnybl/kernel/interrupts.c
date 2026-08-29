@@ -10,6 +10,7 @@
 #include "tasks/scheduler.h"
 #include "kernel/kernel_utils.h"
 #include "filesystem/fs_manager.h"
+#include "tasks/loader.h"
 
 extern vga_text terminal;
 
@@ -131,8 +132,12 @@ void syscall_handler(registers_t* regs) {
             count = regs->edx;
 
             
-            if (fd != 1) {
+            if (fd < 1) {
                 regs->eax = -1;
+                break;
+            }
+            if (fd > 1) {
+                regs->eax = fs_write(fd, (void*)buffer, count);
                 break;
             }
 
@@ -148,9 +153,13 @@ void syscall_handler(registers_t* regs) {
             buffer = regs->ecx;
             count = regs->edx;
 
-            if (fd != 0) { 
+            if (fd < 0 || fd == 1) { 
               regs->eax = -1;
               return;
+            }
+            if (fd > 1) {
+                regs->eax = fs_read(fd, (void*)buffer, count);
+                break;
             }
 
             current_process->state = PROCESS_BLOCKED;
@@ -159,12 +168,12 @@ void syscall_handler(registers_t* regs) {
             current_process->reading_state.count = 0;
             context_switch(current_process, get_next_process(), regs);
             
+            
 
             //keyboard is treated as stdin, so need to block until we recieve that data
             //need to block the process until we wait for input
 
             break;
-
         case SYSCALL_SBRK:
             current_process->user_heap_end += regs->ebx;
             
@@ -198,7 +207,16 @@ void syscall_handler(registers_t* regs) {
                 case FS_RM:
                     fs_rm(path);
                     break;
+                case FS_RUN:
+                    load_program(path);
+                    break;
             }
+            break;
+        case SYSCALL_OPEN:
+            regs->eax = fs_open((char*)regs->ebx);
+            break;
+        case SYSCALL_CLOSE:
+            fs_close(regs->ebx);
             break;
         default:
             vga_text_writeline(&terminal, "syscall not found");

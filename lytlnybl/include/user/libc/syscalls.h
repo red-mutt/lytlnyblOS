@@ -12,11 +12,14 @@
 #define SYSCALL_READ 0x06
 #define SYSCALL_SBRK 0x07
 #define SYSCALL_FSOPS 0x08
+#define SYSCALL_OPEN 0x09
+#define SYSCALL_CLOSE 0x0A
 
 #define FS_LS 0
 #define FS_MKDIR 1
 #define FS_TOUCH 2
 #define FS_RM 3
+#define FS_RUN 4
 
 extern uint32_t syscall(uint32_t CODE, uint32_t a, uint32_t b, uint32_t c);
 
@@ -28,6 +31,8 @@ int write(int fd, void *buff, size_t count);
 int read(int fd, void* buff, size_t count);
 void* sbrk (intptr_t increment);
 void fs_ops(uint8_t operation, char* path);
+int open(const char* path);
+void close(int fd);
 
 
 #endif

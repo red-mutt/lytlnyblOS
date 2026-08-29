@@ -33,3 +33,10 @@ void fs_ops(uint8_t operation, char* path) {
   syscall(SYSCALL_FSOPS, operation, (uint32_t)path, 0);
 }
 
+int open(const char* path) {
+  return syscall(SYSCALL_OPEN, (uint32_t)path, 0, 0);
+}
+
+void close(int fd) {
+  syscall(SYSCALL_CLOSE, fd, 0, 0);
+}

@@ -7,11 +7,10 @@
 #include "user/libc/string.h"
 
 
-void start(void) {
-  printf("hello this is output from the shell\n");
-  
+void start(void) {  
   //REPL
   for (;;) {
+    printf("> ");
     //Read 
     char input[50];
     read(0, input, 50); 
@@ -20,7 +19,7 @@ void start(void) {
     //Eval
     size_t word_count;
     char** words = tokenize_line(input, &word_count);
-    printf("we typed: %s, %d, %d, %s\n", input, strlen(input), word_count, words[0]);
+    //printf("we typed: %s, %d, %d, %s\n", input, strlen(input), word_count, words[0]);
 
     //Print
     if (!execute_command(words, word_count)) {
@@ -38,9 +37,11 @@ void start(void) {
 }
 
 bool execute_command(char** words, size_t word_count) {
-  if (word_count > 2 || word_count < 2) {
+  if (word_count != 2) {
     return false;
   }
+
+  int fd;
 
   if (strcmp(words[0], "ls") == 0) {
     fs_ops(FS_LS, words[1]);
@@ -53,6 +54,97 @@ bool execute_command(char** words, size_t word_count) {
   }
   if (strcmp(words[0], "rm") == 0) {
     fs_ops(FS_RM, words[1]);
+  } 
+  if (strcmp(words[0], "run") == 0) {
+    fs_ops(FS_RUN, words[1]);
+  }
+  if (strcmp(words[0], "cat") == 0) {
+    fd = open(words[1]);
+
+    if (fd < 0) {
+      return false;
+    }
+
+    char buffer[128];
+    int n;
+
+    while ((n = read(fd, buffer, sizeof(buffer))) > 0) {
+      write(1, buffer, n);
+    }
+    printf("\n");
+
+    close(fd);
+  }
+  if (strcmp(words[0], "write") == 0) {
+    fd = open(words[1]);
+
+    if (fd < 0) {
+      return false;
+    }
+
+    size_t capacity = 128;
+    size_t length = 0;
+
+    char* buffer = malloc(capacity);
+
+    if (buffer == NULL) {
+      close(fd);
+      return false;
+    }
+
+    while (true) {
+      char input[128];
+
+      int n = read(0, input, sizeof(input));
+
+      if (n < 0) {
+        free(buffer);
+        close(fd);
+        return false;
+      }
+
+      if (n == 0) {
+        break;
+      }
+
+      if (length + n > capacity) {
+        while (length + n > capacity) {
+          capacity *= 2;
+        }
+
+        char *new_buffer = realloc(buffer, capacity);
+
+        if (new_buffer == NULL) {
+          free(buffer);
+          close(fd);
+          return false;
+        }
+
+        buffer = new_buffer;
+      }
+
+      memcpy(buffer + length, input, n);
+      length += n;
+
+      if (input[n-1] == '\n') {
+        break;
+      }
+    }
+
+    if (length > 0 && buffer[length - 1] == '\n') {
+      length--;
+    }
+
+    if (length > 0) {
+      if (write(fd, buffer, length) != (int)length) {
+        free(buffer);
+        close(fd);
+        return false;
+      }
+    }
+
+    free(buffer);
+    close(fd);
   }
 
   return true;

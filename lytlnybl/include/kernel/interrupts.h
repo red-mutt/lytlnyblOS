@@ -35,11 +35,14 @@
 #define SYSCALL_READ 0x06
 #define SYSCALL_SBRK 0x07
 #define SYSCALL_FSOPS 0x08
+#define SYSCALL_OPEN 0x09
+#define SYSCALL_CLOSE 0x0A
 
 #define FS_LS 0
 #define FS_MKDIR 1
 #define FS_TOUCH 2
 #define FS_RM 3
+#define FS_RUN 4
 
 
 #include <stdint.h>

@@ -6,10 +6,8 @@
 #include "memory/vmm.h"
 #include "memory/heap.h"
 #include "tasks/procman.h"
-#include "filesystem/fs.h"
 #include "filesystem/fs_manager.h"
 #include "kernel/drivers/ata.h"
-#include "kernel/mappings.h"
 #include "tasks/loader.h"
 
 #include <stdint.h>

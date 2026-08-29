@@ -225,7 +225,8 @@ void keyboard_handler () {
                 uint32_t size = traversal_process->reading_state.size;
 
                 if (c[0] == '\b') {
-                  traversal_process->reading_state.count--;
+                  if (traversal_process->reading_state.count)
+                    traversal_process->reading_state.count--;
                   set_cr3((uintptr_t)traversal_process->page_directory);
                   ((char*)(buffer))[traversal_process->reading_state.count] = '\0';
                   set_cr3((uintptr_t)kernel_directory);
@@ -239,6 +240,7 @@ void keyboard_handler () {
 
 
                 if (traversal_process->reading_state.count >= size || c[0] == '\n') {
+                  traversal_process->regs.eax = traversal_process->reading_state.count;
                   traversal_process->reading_state.count = 0;
                   traversal_process->reading_state.size = 0;
                   traversal_process->state = PROCESS_READY;

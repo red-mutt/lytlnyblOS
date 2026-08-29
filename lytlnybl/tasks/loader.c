@@ -4,6 +4,7 @@
 #include "tasks/procman.h"
 #include "memory/pmm.h"
 #include "kernel/mappings.h"
+#include "kernel/kernel_utils.h"
 
 process_t* load_program(const char* path) {
   int32_t fd = fs_open(path);
@@ -22,15 +23,16 @@ process_t* load_program(const char* path) {
 
   process_t* user_proc = create_process((void*)USER_CODE_BASE, PROCESS_USER);
 
-  size_t write_i = 0;
-  for(size_t i = 0; i < ((file_size + 4096) / 4096); ++i) {
+  for(size_t i = 0; i < ((file_size + 4095) / 4096); ++i) {
     void* code_frame = alloc_frame(); 
 
     
     //write to frame
-    for (; write_i < 4096 && write_i < file_size; write_i++) {
-      ((uint8_t*)code_frame)[write_i - (i * 4096)] = ((uint8_t*)buffer)[(i * 4096) + write_i];
-    }
+    size_t offset = i * 4096;
+    size_t bytes = file_size - offset;
+    if (bytes > 4096)
+      bytes = 4096;
+    memcpy(code_frame, buffer + offset, bytes);
 
     map_page(
       user_proc->page_directory,
