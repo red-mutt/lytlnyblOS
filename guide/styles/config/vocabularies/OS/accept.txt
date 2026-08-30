@@ -2,6 +2,7 @@ BIOS
 bootable
 bootloader
 Bootloading
+Cybersecurity
 GDB
 Hussain
 Limine
