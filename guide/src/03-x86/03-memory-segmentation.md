@@ -25,7 +25,7 @@ Memory segmentation works differently in real mode and protected mode.
 Let's look at them individually, starting with a basic overview and
 then looking at how it's done in real mode.
 
-## How does memory segmentation work? An overview
+### How does memory segmentation work? An overview
 
 First, let's look at a basic overview of how memory segmentation works,
 Segmentation is where main memory separates into parts called
@@ -37,7 +37,7 @@ is split into 3 different segments in x86; these are:
 -   Data segment: Stores the data of the program
 -   Stack segment: Stores the data of the program's stack
 
-## How does memory segmentation work in real mode? {#how-does-memory-segmentation-work-in-real-mode style="font-size: 20px;"}
+### How does memory segmentation work in real mode?
 
 We will start with real mode just so we can be clear without having to
 cover all the extra stuff you have to consider in protected mode
@@ -87,7 +87,7 @@ was just easy to show using and jump/call because the
 functionality is related to code, which is easy to manipulate code flow.
 An example for DS would be `lodsb`, and for `ss`, the `push` instruction.
 
-## How was memory segmentation used in the bootloader? {#how-was-memory-segmentation-used-in-the-bootloader style="font-size: 20px;"}
+### How was memory segmentation used in the bootloader? 
 
 When we wrote the bootloader (and the basic kernel), we
 dealt with segments. Let's look at our code. I can now explain it
@@ -145,7 +145,7 @@ the start of code segment for our kernel is. Then, in our kernel, we can
 set the `ds` register to the same as the `cs` to read code and data
 from the same segment.
 
-## How does memory segmentation work in protected mode? An intro to the Global Descriptor Table
+### How does memory segmentation work in protected mode? An intro to the Global Descriptor Table
 
 We have got down how memory segmentation works in real mode, and even
 know how it's used in our bootloader. That's pretty good; now we've
@@ -177,7 +177,7 @@ selectors.
 #### The structure of the segment descriptor, a basic overview
 
 As we said before, a segment descriptor is an entry of the GDT worth 8
-bytes; it's made up of several fields and flags that describe the
+bytes; it's made up of fields and flags that describe the
 attributes of any segment in memory. The processor will then go to the
 descriptor that describes the segment when we need to get information
 about a segment, like the starting memory address (of said segment). As
@@ -188,7 +188,7 @@ different segments on the system from each other, and not letting less
 privileged segments manipulate data or call code in certain places
 (typically more privileged areas of the system).
 
-#### How segments are used when calling and interacting with other memory
+#### How we use segments when calling and interacting with other memory
 
 The most important information about a segment is its base address (the
 starting memory address). In real mode, the base address was stored in
@@ -237,7 +237,7 @@ memory address.
 #### Memory protection in this process, and segment limits
 
 During this process of translation, other information from the segment
-descriptor is used to provide memory protection. One of these pieces of
+descriptor that's used to provide memory protection. One of these pieces of
 information is called the limit of a segment, This means a segment's
 size; if the generated code refers to an offset that exceeds the limit
 of a segment, the processor will stop this operation.
@@ -247,7 +247,7 @@ of a segment descriptor; how the processor interprets the value of the
 segment limit field depends on the granularity flag (G flag), which is
 also stored in the segment's descriptor. When the value of the G flag
 is 0, this means the value of the limit field is interpreted as bytes.
-So if the G flag is set to 0 and the segment limit field is 20, the size
+If the G flag is set to 0 and the segment limit field is 20, the size
 of the segment is seen as 20 bytes. On the other hand, when it is set to
 1, the value of the segment limit field will be interpreted as 4KB
 units. To see what this means, assume the value of the limit field is
@@ -257,7 +257,7 @@ units. To see what this means, assume the value of the limit field is
 
 Because the size of the segment limit field is 20 bits, this means that
 the max numeric value it can represent is 2^20, this means that is the
-G flag is 0, the maximum size is 1MB, and if it's set to 1, the maximum
+G flag is 0, the max size is 1MB, and if it's set to 1, the max
 size is 4 GB.
 
 #### Back to the structure of the descriptor, looking more in depth
@@ -266,30 +266,30 @@ I can show you the complete structure of a descriptor using a diagram
 taken from the "Intel® 64 and IA-32 Architectures Software Developer's
 Manual (Volume 3A)", seen here:
 
-![Segment Descriptor](images/os/segdescriptor.png)
+![Segment Descriptor](../images/os/segdescriptor.png)
 
 The first 16 bits (bit 0-15) are the first 16 bits of the segment's
-limit. then the next 24 are the first 24 bits of the segment's base,
+limit. The next 24 are the first 24 bits of the segment's base,
 then we have our type field, S flag, DPL field, P flag, Then we have the
 next nibble of our limit, the AVL flag, the L flag (for 64 bit), the DB
 flag, the G flag, and the next section of our base.
 
 You may be wondering, why is the segment descriptor formatted so
-strangely? and it's simply because of reverse compatibility with the
+strangely? And it's simply because of reverse compatibility with the
 80286 16-bit microprocessor; here is a similar diagram seen from the
 Intel 80286 Programmer's Reference Manual:
 
-![Old Descriptor](images/os/olddescriptor.png)
+![Old Descriptor](../images/os/olddescriptor.png)
 
 On the 80286 diagram, the base size was 24 bits, and the limit's size
-was 16 bits, therefore we just extend this for our newer proccessor
+was 16 bits, then we just extend this for our newer processor
 architecture.
 
 #### A segment's type
 
-When a segment is defined, the processor should know how to interpret
-the content inside this segment; this is defined by the type of segment.
-We know so far that there are code segments. and data segments, these
+When a segment gets defined, the processor should know how to interpret
+the content inside this segment; this is defined by the segment's type.
+We know so far that there are code segments and data segments, these
 two types belong to a category of segments called application segments;
 there is another category called system segments, and many types of
 segments belong to it.
@@ -297,19 +297,19 @@ segments belong to it.
 Whether a specific segment is an application or system segment, is
 defined in the S flag, also known as the descriptor type flag, which is
 the fifth bit in the fifth byte of the segment descriptor. When the S
-flag is 0, the segment is considered a system segment; when it is an
+flag is 0, the segment is considered a system segment; when it's an
 application segment, the value of S is 1. We will focus on when the S
 flag is 1.
 
 The only application segments are code and data. If some application
 segment is referenced by currently running code, the processor will go
-to the descriptor of this segment. and by reading the S flag (which
+to the descriptor of this segment and by reading the S flag (which
 should be 1), it should know that the segment in question is an
 application segment, but how does it know whether it's a data or code
 segment? This info is stored in a field called the type field in the
 segment descriptor.
 
-The type field is the first 4 bits of the 5th byte of the segment
+The type field is the first 4 bits of the fifth byte of the segment
 descriptor. The most significant bit specifies if the application
 segment is a code or data segment; the least significant specifies
 whether the segment has been accessed or not; When the value of this is
@@ -322,7 +322,7 @@ According to Intel, this flag can be used for virtual memory management
 and debugging.
 
 The other two bits or flags of the type field depend on whether it's a
-code or data segment. So let's cover those individually.
+code or data segment. Let's cover those individually.
 
 #### The type field for Code segments
 
@@ -341,11 +341,11 @@ is conforming (the value of the conforming flag is 1), this means that
 code that runs at a less-privileged level can call this segment, which
 runs in at a higher privilege level. Why would we want this? Well, the
 kernel can sometimes provide code that is basic and may be needed by
-many programs. This code would have a privilege level of 0, as it is a
-part of the kernel and would gain the highest privilege level; however,
+many programs. This code would have a privilege level of 0, as it's a
+part of the kernel and would gain the highest privilege level; 
 any other programs, which would have a lower privilege level wouldn't
-really be able to call this without the conforming flag. So this is why
-it is needed.
+really be able to call this without the conforming flag. This is why
+it's needed.
 
 #### The type field for Data segments
 
@@ -355,8 +355,8 @@ significant is called the write-enabled flag. (W flag)
 
 The write-enabled flag gives us the ability to decide whether we want
 our data segment to be read-only or not; when set to 0, the data will be
-read-only; when set to 1, the data segment will be both. readable and
-writable
+read-only; when set to 1, the data segment will be both readable and
+writeable
 
 The expansion-direction flag will be covered when I move onto the x86
 run-time stack. For a vague definition now, we could say that when the
@@ -365,26 +365,26 @@ the value of the flag is 1, the data segment will expand down. (These
 are Intel's terms, so don't blame me).
 
 An extra thing about data segments is that all of them are
-non-conforming, which means less priveleged code cannot access data at a
-more priveleged level, and all data segments can be accessed by a
+non-conforming, which means less privileged code cannot access data at a
+more privileged level, and all data segments can be accessed by a
 more-privileged code.
 
-#### Privelege levels in segments
+#### Privilege levels in segments
 
 Prior, I have probably stated that a segment should belong to a
 privilege level, and based on this, there are rules for how certain
-segments can interact based on these privilege levels. which the
+segments can interact based on these privilege levels. Which the
 processor would enforce; these privilege levels are defined by the
-descriptor privelege level (DPL) in the segment descriptor; as this is a
+descriptor privilege level (DPL) in the segment descriptor; as this is a
 2 bit value, the possible privilege levels are 0, 1, 2, and 3, the DPL
 is the second and third most significant bits of byte 5 in a descriptor.
 
 #### The other flags: The D/B flag
 
-There are only 3 flags left that I haven't covered. The first is a flag
+There's only 3 flags left that I haven't covered. The first is a flag
 whose name changes depending on the segment it resides within; it is
-located within the second. most significant bit in byte 6 when it within
-a code segment, it is called the default operation size flag (D flag),
+located within the second. Most significant bit in byte 6 when it within
+a code segment, it's called the default operation size flag (D flag),
 When the processor executes the instructions, it uses the D flag to
 choose the length of the operands, depending on the currently executing
 instruction. If the value of the D flag is 1, the processor is going to
@@ -396,18 +396,18 @@ memory address.
 
 When the segment is a stack segment, the same flag is called the default
 stack pointer size flag (B flag), and it decides the size of the memory
-address that points to the stack. which is commonly known as the stack
+address that points to the stack. Which is commonly known as the stack
 pointer, used by stack instructions such as push and pop. When the value
 of the B flag is 1, then the size of the stack pointer will be 32 bits,
-and it's value will be stored in the register ESP. When the value of
+and its value will be stored in the register ESP. When the value of
 the B flag is 0, the size of the stack pointer will be 16 bits, and
-it's value will be stored. in the register SP
+its value will be stored. in the register SP
 
 When dealing with a data segment that grows upward, this is called an
-upper bound flag (B flag); when it's value is 1, the maximum possible
+upper bound flag (B flag); when its value is 1, the maximum possible
 size of the segment will be 4 GB; otherwise, the maximum size is 64KB
 
-To note, the value of the D/B flag should usually be 1 for 32 bit
+To note, the value of the D/B flag should be 1 for 32 bit
 segments and 0 for 16 bit segments.
 
 #### The other flags: The L flag
@@ -420,9 +420,9 @@ the opposite; when the value of the L flag is 1, the D/B flag should be
 
 #### The other flags: The AVL flag
 
-This flag doensn't really have any paticular meaning for the processor,
-however, this flag is availible for the OS to use in whatever way it
-needs, or it is just ignored.
+This flag doesn't really have any particular meaning for the processor,
+this flag is available for the OS to use in whatever way it
+needs, or it's just ignored.
 
 And that wraps up all coverage of the descriptor, moving on.
 
@@ -431,27 +431,27 @@ And that wraps up all coverage of the descriptor, moving on.
 As we know, the GDTR stores the base (physical) address of the global
 descriptor table, but it also stores the limit of the table. To load a
 value into the register of the GDTR, follow the instruction:
-[lgdt]{.hljs} must be used; this stands for "load global descriptor
+`lgdt` must be used; this stands for "load global descriptor
 table." It takes one operand, which is the value that should be loaded
-into the GDTR. This operand's structure should be similar to the actual
+into the GDTR. These operands structure should be similar to the actual
 structure of the GDTR, which is shown here:
 
-![GDTR Diagram](images/os/GDTR%20diagram.png)
+![GDTR Diagram](../images/os/GDTR%20diagram.png)
 
 We can see it's 48 bits long, starting with the 16-bit limit, and then
 the 32-bit base. The operand should follow this same formula. This also
 means that we have some limits to our GDTR (no pun intended), as our
-limit is a 16-bit number, the maximum value of our GDT. is 64KB (65536)
+limit is a 16-bit number, the max value of our GDT is 64KB (65536)
 bytes.
 
 #### The local descriptor table
 
-The GDT is system-wide; this means that it is available to every single
+The GDT is system-wide; this means that it's available to every single
 process within the system. x86 also gives us the power to create local
 descriptor tables (LDTs) in protected-mode, These have the same
-functionality and structure as the GDT. Multiple of these LDT's can be
+functionality and structure as the GDT. Multiple of these LDTs can be
 made; each one can be private to a specific process currently running on
-the system; multiple processes can also share a single LDT that only
+the system; many processes can also share a single LDT that only
 those processes can interact with, and no other processes will be able
 to interact with this LDT.
 
@@ -463,13 +463,13 @@ GDT for the LDT; the LDT table will be considered as a system segment,
 so the value of the S flag would be 0, and because there are many
 different system segments in x86, we would then have to define that this
 is an LDT. This is done via the type field, and its value should be
-0010b. How the processor can tell which table should be used in the
-monment for a given segment between the GDT and the LDT will be
+0010b. How the processor can tell which table should be used at the moment 
+for a given segment between the GDT and the LDT will be
 discussed when we talk about segment selectors.
 
-The x86 instruction lldt is used to load the LDT table that we would
+The x86 instruction `lldt` is used to load the LDT table that we would
 like to use now into a special register called the LDTR, which is 16-bit
-and contains the index of the segment. descriptor, which describes the
+and contains the index of the segment. Descriptor, which describes the
 LDT table.
 
 #### More on the segment selector
@@ -478,7 +478,7 @@ In reality, the way we described the segment selector before as an
 index, is not actually true; the index is simply just a single part of
 the segment selector. A full diagram of it can be seen here:
 
-![Segment Selector](images/os/segmentselector.png)
+![Segment Selector](../images/os/segmentselector.png)
 
 We can see that it is 16 bits, and the first two bits are occupied by a
 field called the "requester privilege level" (RPL). The next bit is
@@ -493,7 +493,7 @@ and then the descriptor on the LDT is read.
 
 The RPL, as the name suggests, is to do with privilege levels; we
 mentioned before the DPL, the privilege level of a given segment, and
-there also exists the CPL. which is the privilege level of the currently
+there also exists the CPL. Which is the privilege level of the currently
 executing code, The RPL is used when a low privilege program calls,
 let's say, kernel data that is a more high privilege. When calling, the
 RPL defines the privilege level of the caller, so any attempts to reach

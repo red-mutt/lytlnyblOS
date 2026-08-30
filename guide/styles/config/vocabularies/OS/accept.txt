@@ -2,9 +2,11 @@ BIOS
 bootable
 bootloader
 Bootloading
+callee
 Cybersecurity
 GDB
 Hussain
+LDTs
 Limine
 Makefile
 Makefiles
