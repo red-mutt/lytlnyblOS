@@ -1,0 +1,11 @@
+Tanenbaum
+Makefiles
+QEMU
+bootloader
+Limine
+Mohammed
+Hussain
+NASM
+BIOS
+GDB
+OSDev
