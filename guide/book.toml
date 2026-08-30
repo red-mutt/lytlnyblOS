@@ -2,3 +2,6 @@
 title = "The lytlnyblOS Guide"
 authors = ["redmutt"]
 language = "en"
+
+[output.html]
+site-url = "/lytlnyblOS/"
