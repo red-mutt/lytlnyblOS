@@ -44,7 +44,7 @@ the code I provide as inspiration.
 
 ## Project Specifications
 
-My operating system is for x86_32 CPU architecture, stored on a virtual floppy disk, and made using C and ASM.
+My operating system is for x86_32 CPU architecture, stored on a virtual disk image, and made using C and ASM.
 There will also be some other tools used to make the development process a lot easier, such as GDB,
 to debug whatever I write, Makefiles to build the project, and QEMU to run the OS without having to 
 reboot my system repeatedly.
