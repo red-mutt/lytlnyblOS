@@ -1,7 +1,28 @@
 [book]
-title = "The lytlnyblOS Guide"
-authors = ["redmutt"]
+title = "The lytlnyblOS Book"
+authors = ["red-mutt"]
+description = "A guide to building an operating system from scratch."
 language = "en"
+src = "src"
 
 [output.html]
+default-theme = "navy"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/red-mutt/lytlnyblOS"
+edit-url-template = "https://github.com/red-mutt/lytlnyblOS/edit/main/guide/{path}"
+no-section-label = true
 site-url = "/lytlnyblOS/"
+
+
+[output.html.fold]
+enable = true
+level = 1
+
+[output.html.playground]
+copyable = true
+editable = false
+line-numbers = true
+
+[build]
+build-dir = "book"
+
