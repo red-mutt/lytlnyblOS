@@ -2,6 +2,7 @@ BIOS
 bootable
 bootloader
 Bootloading
+breakpoint
 callee
 Cybersecurity
 GDB

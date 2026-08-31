@@ -1,6 +1,6 @@
 # Part V : VGA Text Mode
 
-In this chapter we are making a convenient way to output text to the screen using the vga text buffer we wrote to previously when we loaded into C, this task is a lot more like regular programming, so i will allow some creative freedom Here is the header file that i have created:
+In this chapter we are making a convenient way to output text to the screen using the VGA text buffer we wrote to previously when we loaded into C, this task is a lot more like regular programming, so i will allow some creative freedom Here is the header file that i have created:
 
 ```
 #ifndef VGA_TEXT_H

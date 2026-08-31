@@ -2,7 +2,7 @@
 
 ## A reminder of what we have now
 
-First after we covered so much theory (and honestly it\'s been a long
+First after we covered so much theory (and honestly it's been a long
 time since I've written this guide) we should take a quick look again
 at everything we have written. Part two ended us with a Makefile that
 had this content:
@@ -147,11 +147,11 @@ With low level programming tasks such as this, it's important that
 we have a clean way to debug our programs, despite debugging still being
 important in regular programming, it's often omitted and not really
 learned to a degree that it should be by most people learning
-programming. This is why in this guide i will be intentionally making us
+programming. This is why in this guide I will be intentionally making us
 have an error called a **triple fault**, and then we will be using a
 debugger to fix it.
 
-you may be asking *\"what is a triple fault?\"* A triple fault is an x86
+You may be asking *\"what is a triple fault?\"* A triple fault is an x86
 CPU reset that occurs when the processor encounters an exception, fails
 to invoke the exception handler (causing a double fault), and then also
 fails to invoke the double fault handler. At that point, the CPU resets
@@ -159,22 +159,22 @@ itself. In our QEMU emulator this would look like a bunch of text
 flashing on the screen, this is because the system is continually
 rebooting itself over and over again.
 
-The debugger we are going to be using is gdb, make sure to install it
+The debugger we are going to be using is GDB, make sure to install it
 before continuing, or install whatever debugger you prefer.
 
-In the state our bootloader and kernel are being compiled as now, using
+With the compiled state of our bootloader and kernel as of now, using
 a debugger will be pretty tricky, this is because within our debugger we
 will not be able to access function names, labels, source lines and
 variable names (among many other things). We can still use the debugger
 like this, but it will function more as a CPU monitor than a source
 debugger so it\'s important to configure our build environment so we get
-alot more context when debugging.
+a lot more context when debugging.
 
 ### Setting up GDB
 
 Binary files (which is what we are compiling to now) cannot give
-functions names, labels and such so the method i am using to get access
-to them is i am going to be compiling to the .elf format, i will then be
+functions names, labels and such so the method I am using to get access
+to them is I am going to be compiling to the .elf format, I will then be
 copying the .elf compilation back into .bin this is because if we use
 the .elf file we would have to refactor some of the code in our
 bootloader.
@@ -183,55 +183,56 @@ To compile to elf must make a linker script. This tells the linker where
 to place things in memory. A linker is a program that combines object
 files into a final executable and fixes up all the addresses.
 
-My linker script, called linker.ld looks like this.
+My linker script, called `linker.ld` looks like this.
+```
+ENTRY(start)
 
-    ENTRY(start)
+SECTIONS
+{
+    . = 0x9000;
 
-    SECTIONS
+    .text :
     {
-        . = 0x9000;
-
-        .text :
-        {
-            *(.text)
-        }
-
-        .data :
-        {
-            *(.data)
-        }
-
-        .bss :
-        {
-            *(.bss)
-        }
+        *(.text)
     }
 
-(explain the code maybe)
+    .data :
+    {
+        *(.data)
+    }
 
-And then we must add two lines to our makefile, one to link the object
+    .bss :
+    {
+        *(.bss)
+    }
+}
+```
+
+And then we must add two lines to our Makefile, one to link the object
 file into an elf, and one to copy the elf into a bin file, we must also
-edit another line in order to compile our kernel into an object file in
-the elf format. The bootloader will be kept as plain binary as we will
+edit another line to compile our kernel into an object file in
+the elf format. The bootloader is a plain binary as we will
 not be debugging it at the current moment and will only be changing it
-to add blocks . This is our new makefile:
+to add blocks. This is our new Makefile:
 
-    BOOT_FILE = bootloader/bootloader.asm 
-    KERNEL_FILE = kernel/basic_kernel.asm 
-    LINKER = kernel/linker.ld
+```makefile
+BOOT_FILE = bootloader/bootloader.asm 
+KERNEL_FILE = kernel/basic_kernel.asm 
+LINKER = kernel/linker.ld
+        
+build: $(BOOT_FILE) $(KERNEL_FILE)
+    nasm -f bin $(BOOT_FILE) -o bootstrap.o
+    nasm -f elf32 -g -F dwarf $(KERNEL_FILE) -o kernel.o
+    ld -m elf_i386 -T $(LINKER) kernel.o -o kernel.elf
+    objcopy -O binary kernel.elf kernel.bin
+    dd if=bootstrap.o of=kernel.img
+    dd if=kernel.bin of=kernel.img seek=1 conv=notrunc
+    qemu-system-i386 -drive format=raw,file=kernel.img -s -S
             
-    build: $(BOOT_FILE) $(KERNEL_FILE)
-        nasm -f bin $(BOOT_FILE) -o bootstrap.o
-        nasm -f elf32 -g -F dwarf $(KERNEL_FILE) -o kernel.o
-        ld -m elf_i386 -T $(LINKER) kernel.o -o kernel.elf
-        objcopy -O binary kernel.elf kernel.bin
-        dd if=bootstrap.o of=kernel.img
-        dd if=kernel.bin of=kernel.img seek=1 conv=notrunc
-        qemu-system-i386 -drive format=raw,file=kernel.img -s -S
-                
-    clean:
-        rm -f *.o
+clean:
+    rm -f *.o
+```
 
-the -s flag in qemu starts a TCP port in 1234 and -S tells QEMU to
-freeze at startup, both of these allow us to connect gdb.
+The -s flag in QEMU starts a TCP port in 1234 and -S tells QEMU to
+freeze at startup, both of these allow us to connect GDB.
 

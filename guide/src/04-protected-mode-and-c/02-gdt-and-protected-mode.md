@@ -1,15 +1,15 @@
 ## Making the GDT
 
-before we move into protected mode we must create the GDT. In order to
+Before we move into protected mode we must create the GDT. To
 have a complete GDT we first need 3 descriptors, one is the null
-descriptor which is just a 64 bits of 0. The second is the kernel space
+descriptor which is just 64 bits of 0. The second is the kernel space
 code descriptor. The third is the kernel space data descriptor. We could
-also make descriptors for the user space, but i will refrain from doing
+also make descriptors for the user space, but I will refrain from doing
 that for now.
 
-First let\'s define the null descriptor which looks like this:
+First let's define the null descriptor which looks like this:
 
-``` language-x86asm
+```x86asm
 gdt_start:
 gdt_null:
     dq 0
@@ -17,7 +17,7 @@ gdt_null:
 
 Pretty simple, now for the code descriptor
 
-``` language-x86asm
+```x86asm
 gdt_code:
     dw 0xFFFF ; limit
     dw 0x0000 ; base_low
@@ -29,14 +29,14 @@ gdt_code:
 
 #### The base:
 
-The comments i left here are pretty useful. You will remember the
-descriptor structure from the previous chapter. We set All of the Base
+The comments I left here are pretty useful. You will remember the
+descriptor structure from the previous chapter. We set All the Base
 to 0 because we want the starting address for our kernel space code to
 be address 0, this is because with our descriptor we are essentially
 making a flat memory model so whenever we reference an address, for
-example \[0xB8000\] for writing to the screen with vga, we access this
+example `0xB8000` for writing to the screen with VGA, we access this
 address using the base + offset (the offset being 0xB8000 which is also
-the actual address). So it makes it so we don\'t have to factor in a
+the actual address). It makes it so we don't have to factor in a
 base to get to the addresses we want.
 
 #### The limit:
@@ -47,52 +47,57 @@ access everything that is in memory.
 
 #### The access byte
 
-The access byte tells us what kind of segment we have and who is allowed
-to use it. For our 0x9A this translates to 0x9A = 10011010, let\'s look
-at the flags:\
-`P DPL DPL S E DC RW A`\
-`1 0 0 1 1 0 1 0`\
+The access byte tells us what kind of segment we have and who has permission
+to use it. For our `0x9A` this translates to `0x9A = 10011010`, let's look
+at the flags:
 
--   **The Present flag (P)** tells us that this segment exists, if it is
-    set to 0 and we try to access the segment, the CPU will fault.
--   **The Descriptor Privilege Level (DPL)** is self explanative, we set
-    it to 0 because we want the highest privelege.
--   **The Descriptor Type (S)** states what kind of descriptor it is, if
-    this is set to 1 it is a normal code or data segment, if 0, it is a
-    system descriptor such as a LDT, and we don\'t need that yet
--   **The Executable (E)** when set to 1 means that it is a code
+```
+P DPL DPL S E DC RW A
+1 0   0   1 1 0  1  0
+```
+
+-   **The Present flag (P)** tells us that this segment exists, if it's
+    set to 0, and we try to access the segment, the CPU will fault.
+-   **The Descriptor Privilege Level (DPL)** is self-explanatory, we set
+    it to 0 because we want the highest privilege.
+-   **The Descriptor Type (S)** states what kind of descriptor it's, if
+    this is set to 1 it's a normal code or data segment, if 0, it's a
+    system descriptor such as a `LDT`, and we don't need that yet
+-   **The Executable (E)** when set to 1 means that it's a code
     segment, when zero it represents data
--   **DC stands for Direction/Conforming**When set to 0 it is a
+-   **DC stands for Direction/Conforming** When set to 0 it's a
     non-conforming code segment, this means that only code running at
-    the correct privelege level may enter it, if DC was 1 then less
-    priveleged code may jump into the segment
+    the correct privilege level may enter it, if DC was 1 then less
+    privileged code may jump into the segment
 -   **Read/Write (RW)** when set to 0 means executable only, but it can
     not be read, so code cannot be read as data, so we should set RW to
     1 so it can be executable and readable
 -   **The access bit (A)** States whether the segment has been used, it
-    is automatically set by the cpu later.
+    is automatically set by the CPU later.
 
-So we can see that the access byte, as the name implies, controls
+We can see that the access byte, as the name implies, controls
 access.
 
 #### The flags nybble
 
-Our 0xC = 1100, let\'s take a look:\
-G D L AVL\
-1 1 0 0\
+Our `0xC = 1100`, let's take a look:
+```
+G D L AVL
+1 1 0 0
+```
 
 -   **Granularity (G)** being set to 1 makes our limit be measured in
     4KiB blocks rather than bytes
 -   **Default Operand Size (D)** being set to one states the segment is
     32 bits instead of 16
--   **Long mode (L)** being set to 0 keeps us in 32 bits, if it was 1 it
+-   **Long mode (L)** being set to 0 keeps us in 32 bits, if it's 1 it
     would let us go into 64 bit long mode on x86-64 systems
--   **The Available (AVL)** flag is mostly ignored by the CPU, so let\'s
+-   **The Available (AVL)** flag is ignored by the CPU, so let's
     just set it to 0
 
-Now let\'s look at the data segment which is pretty similar:
+Now let's look at the data segment which is pretty similar:
 
-``` language-x86asm
+```x86asm
 gdt_data:
     dw 0xFFFF
     dw 0x0000
@@ -106,10 +111,10 @@ The only difference here is that we turn off the executable flag as this
 is a data segment and not a code segment.
 
 The final part of the GDT is we need some memory that we will load into
-the global desciptor table registor, this will include the size of the
+the global descriptor table register, this will include the size of the
 GDT and the start address. Mine looks like this:
 
-``` language-x86asm
+``` x86asm
 gdt_end:
 gdtr:
     dw gdt_end - gdt_start - 1 ; set manually for testing
@@ -118,11 +123,11 @@ gdtr:
 
 ## Going into Protected mode
 
-And that\'s the end of our gdt and all the additional data we need, now
+And that's the end of our GDT and all the data we need, now
 we can start entering the GDT, we can do that with this block of
 instructions
 
-``` language-x86asm
+```x86asm
 enter_protected:
     cli ;disable interrupts
     lgdt [gdtr] ; load GDT registor with start address of GDT
@@ -134,13 +139,13 @@ enter_protected:
     jmp CODE_SEG:p_mode_main
 ```
 
-This is essentially 3 things, we first use `cli` which disables our bios
-interrupts, we then load the descriptor table with `lgdt>` we then set
-the protection enable bit in the control registor, after this we then
-perform a far jump into the p_mode_main label (which we will define
+This is essentially 3 things, we first use `cli` which disables our BIOS
+interrupts, we then load the descriptor table with `lgdt` we then set
+the protection enable bit in the control register, after this we then
+perform a far jump into the `p_mode_main` label (which we will define
 later) using the code descriptor
 
-``` language-x86asm
+```x86asm
 p_mode_main:
     mov ax, 10h
     mov ds, ax
@@ -154,16 +159,16 @@ hang:
     jmp hang
 ```
 
-This is our code for our p_mode_main, it\'s simple, we just set the data
-segment similary to how we did with the `CODE_SEG` earlier, if we wanted
+This is our code for our `p_mode_main`, it's simple, we just set the data
+segment similarly to how we did with the `CODE_SEG` earlier, if we wanted
 we could replace `CODE_SEG` with 08h. as this would be the value
-calculated by `gdt_code - gdt_start` we also load that into all of our
+calculated by `gdt_code - gdt_start` we also load that into all our
 other special segment registers
 
 And that should be all for going into protected mode, our full code
 should look like this:
 
-``` language-x86asm
+```x86asm
 ; no org code starts at 0x0900 though
 [bits 16]
 start:
@@ -237,9 +242,9 @@ gdtr:
     dd gdt_start
 ```
 
-Let\'s take away our -s and -S flags from our makefile and then run the
+Let's take away our -s and -S flags from our Makefile and then run the
 program and see what happens. What is most likely happening for you is
 that it looks like a bunch of text is flashing on the screen this is our
-triple fault, if not and the program hangs, you\'re probably in real
-mode and can skip what i\'m about to talk about next.
+triple fault, if not and the program hangs, you're probably in real
+mode and can skip what I'm about to talk about next.
 
