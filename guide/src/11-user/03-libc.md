@@ -1,6 +1,6 @@
 # libc
 
-I\'m sure if you\'ve gotten up to this point; you know what a C standard
+I'm sure if you've gotten up to this point; you know what a C standard
 library is. That is what we are implementing here. We actually have 2
 different choices we can take here, we can either:
 
@@ -12,25 +12,25 @@ For the latter, this would require us to have 17 syscalls (According to
 POSIX standards) that we would then use to weld together the libc and
 the existing kernel. These syscalls being:
 
-1.  \_exit
-2.  close\_
-3.  envion\_
-4.  execve\_
-5.  fork\_
-6.  fstat\_
-7.  getpid\_
-8.  isatty\_
-9.  kill\_
-10. link\_
-11. lseek\_
-12. open\_
-13. read\_
+1.  _exit
+2.  close_
+3.  envion_
+4.  execve_
+5.  fork_
+6.  fstat_
+7.  getpid_
+8.  isatty_
+9.  kill_
+10. link_
+11. lseek_
+12. open_
+13. read_
 14. sbrk
-15. stat\_
-16. times\_
-17. unlink\_
-18. wait\_
-19. write\_
+15. stat_
+16. times_
+17. unlink_
+18. wait_
+19. write_
 
 However, folling the trend of us making all of our own stuff up until
 now (for example, the bootloader) and the fact that we currently do not
@@ -45,7 +45,7 @@ Please be warned however, writing your own libc takes a very long
 ammount of time, using an existing one would allow you to focus much
 more on the development of the OS, rather than the libc. Another issue
 with using your own libc is that it gives us the ability to port our
-existing software, therefore with our own it\'s very possible for this
+existing software, therefore with our own it's very possible for this
 porting of software to not work. (If you like doom, this is the main
 thing required to get doom running on your OS :0)
 
@@ -92,12 +92,12 @@ everything that we will be making, here:
 
 You may notice that in the previous section, we did not write any
 syscalls that interface with the heap allocator we wrote for our kernel,
-this is because the kernel\'s heap and a user process\'s heap are kept
+this is because the kernel's heap and a user process's heap are kept
 completely seperate, we will be writing a completely seperate heap
 allocator here. This makes the memory section the hardest section in our
-libc, but it\'s nothing we haven\'t done before, so we should be fine!
+libc, but it's nothing we haven't done before, so we should be fine!
 
-Basically, writing our libc isn\'t really going to be too hard, but with
+Basically, writing our libc isn't really going to be too hard, but with
 all these functions and the requirement of a new memory allocator, it is
 going to take a bit of a long time. This chapter will be structured by
 me going one by one and getting you aquainted with the information

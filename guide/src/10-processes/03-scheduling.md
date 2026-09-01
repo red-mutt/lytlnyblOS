@@ -2,13 +2,22 @@
 
 ## Context
 
-The scheduler currently is going to be quite simple to make, this is because we already have our context switcher and process manager. The scheduler just simply decides what process ought to be run next. When making the scheduler, we can abstract away considering things like, page allocation, the process's stack, the heap and all sorts of stuff, the only things that we need to consider are the current process, the linked list of all processes and each process's state.
+The scheduler currently is going to be simple to make, this is because we
+already have our context switcher and process manager. The scheduler just
+simply decides what process ought to be run next. When making the scheduler, we
+can abstract away considering things like, page allocation, the process's
+stack, the heap and all sorts of stuff, the only things that we need to
+consider are the current process, the linked list of all processes and each
+process's state.
 
-The scheduling algorithm we are going to be using is round-robin, if you are unfamiliar with this it gives each process a time slice (basically an ammount of ticks) to execute, and then you cycle through executing all the available processes for the given time slice.
+The scheduling algorithm we are going to be using is round-robin, if you are
+unfamiliar with this it gives each process a time slice (basically an amount
+of ticks) to execute, and then you cycle through executing all the available
+processes for the given time slice.
 
 ## The code
 
-```
+```c
 #ifndef SCHEDULER_H
 #define SCHEDULER_H
 
@@ -25,9 +34,11 @@ void schedule(registers_t* regs);
 #endif
 ```
 
-Just like the context switcher, this is a very small header file, the single definition we make is the default ammount of timer ticks that it takes to switch the process. The implementation for this is just as small:
+Just like the context switcher, this is a small header file, the single
+definition we make is the default amount of timer ticks that it takes to
+switch the process. The implementation for this is just as small:
 
-```
+```c
 #include "scheduler.h"
 
 volatile uint32_t scheduler_tick_count = 0;
@@ -63,19 +74,25 @@ void schedule(registers_t* regs) {
 }
 ```
 
-### get\_next\_process
+### `get_next_process`
 
-This is just a traversal algorithm that just cycles through the list until it finds the next ready process. If it traverses to the running process again then it just returns that instead.
+This is just a traversal algorithm that just cycles through the list until it
+finds the next ready process. If it traverses to the running process again then
+it just returns that instead.
 
-### schedule
+### `schedule`
 
-This is the main thing we are calling from the timer in order to schedule. If our scheduler tick count goes upto the value we have in our time\_slice then we execute the bulk of the function. This is just where we find the next process using the get\_next\_process function, and then if it's not the same as our current process we perform a context switch.
+This is the main thing we are calling from the timer to schedule. If
+our scheduler tick count goes up to the value we have in our `time_slice` then we
+execute the bulk of the function. This is just where we find the next process
+using the `get_next_process` function, and then if it's not the same as our
+current process we perform a context switch.
 
 ## Refactoring timer and main
 
-Let's take a look at the new timer:
+Let's have a look at the new timer:
 
-```
+```c
 #include "timer.h"
 #include "interrupts.h"
 #include "vga_text.h"
@@ -122,9 +139,11 @@ void timer_wait_ms(uint32_t ms) {
 }
 ```
 
-We actually just remove alot of the previous stuff and just replace it with the schedule function. Nice! negative code added! And then next we have the the changes to main, this is mostly also just removing stuff:
+We actually just remove a lot of the previous stuff and just replace it with the
+schedule function. Nice! Negative code added! And then next we have the
+changes to main, this is also just removing stuff:
 
-```
+```c
 #include "vga_text.h"
 #include "interrupts.h"
 #include "timer.h"
@@ -189,4 +208,5 @@ void kernel_main(void)
 }
 ```
 
-And this should completely work, next up is user managment!!! We will next actually have an operating system and not just a kernel.
+And this should work, next up is user management! We will next actually have an 
+operating system and not just a kernel.

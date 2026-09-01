@@ -8,20 +8,20 @@ We made our bootloader quite a while ago, if you remember, within our
 bootloader we were reading from a disk (this disk being the kernel.img
 disk image) and loading the data directly into memory at `0x9000`. What
 we have right now is not a file system, i just wanted to make that
-clarification now becuase that\'s the only point in our development
+clarification now becuase that's the only point in our development
 where we had to interface with some sort of disk or secondary storage.
 
-We can also keep this primitive method of loading the kernel, we don\'t
+We can also keep this primitive method of loading the kernel, we don't
 and we will not make the filesystem responsible for loading our kernel
 into memory for our operating system (although you can by yourself if
 you want to). Our booloader can continue using the primitive method i
 just described. Just like all of our other technologies, the filesystem
 can be initialised and access the rest of the disk.
 
-So we don\'t have a filesystem, but what we do have is a (virtual) disk
+So we don't have a filesystem, but what we do have is a (virtual) disk
 that is a part of our virtual machine thoughout all of execution that we
 have left untouched (other than in the bootloader). And on our disk
-there is a structure such as:\
+there is a structure such as:
 `[bootloader][kernel][kernel][kernel]...` The file system we make is
 essentially a way we are going to interpret and communicate with the
 data on this disk. For example, we may have:
@@ -54,14 +54,14 @@ block would be 512 bytes long and therefore something like a text file
 may occupy a certian number of blocks. We need a way to track the
 relationship between blocks and files, this is where inodes come in.
 
-An inode would essentially be the filesystem\'s record describing files.
+An inode would essentially be the filesystem's record describing files.
 An inode would contain information such as: file type, file size, file
 permissions, ownership, timestamps, pointers to data blocks.
 
-You may then notice that when it comes to inodes, we didn\'t mention the
+You may then notice that when it comes to inodes, we didn't mention the
 filename, this is becuase a filename would be stored within a directory,
-a directory essentially is a mapping between a filename and it\'s
-respective inode. So when we access \"./hello.txt\" our filesystem does:
+a directory essentially is a mapping between a filename and it's
+respective inode. So when we access "./hello.txt" our filesystem does:
 `"./hello.txt" -> rootdir (find "hello.txt") -> inode x (find data blocks -> found blocks y and z -> parse file contents`
 
 We also mentioned a superblock, this is what describes the filesystem
@@ -71,9 +71,9 @@ of free-space map, location of data region. Without the superblock, we
 would have to assume a lot of things about our filesystem, which is not
 really good practice.
 
-What\'s the free-space bitmap? This is essentially the same thing we did
+What's the free-space bitmap? This is essentially the same thing we did
 within our physical memory manager but for the filesystem, it describes
-what blocks are occupied and which aren\'t within a simple bitmap.
+what blocks are occupied and which aren't within a simple bitmap.
 
 And then finally we have the data region, where our blocks are actually
 contained.

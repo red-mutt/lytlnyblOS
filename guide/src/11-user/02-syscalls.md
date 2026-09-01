@@ -1,10 +1,10 @@
 # System Calls
 
-Now it\'s time to make a userspace some what useful. our set of syscalls
+Now it's time to make a user space somewhat useful. Our set of syscalls
 will not meet the POSIX standards, and will be an incredibly simple
-implementation. The good part of this is that it\'s fairly simple to
+implementation. The good part of this is that it's fairly simple to
 extend the set of syscalls that we have, we can just simply add more and
-more as our operating system requires more and more things.\
+more as our operating system requires more and more things.
 Our set of syscalls will be:
 `exit, getpid, yield, sleep, write, read, sbrk`
 
@@ -19,26 +19,26 @@ this by checking our interrupts register type. We can use the same
 interrupt for each syscall and then eax will just a value that
 identifies the syscall.
 
-Let\'s look into each and every one of the syscalls we\'ll make and how
-they\'re supposed to work
+Let's look into each and every one of the syscalls we'll make and how
+they're supposed to work
 
 ### void exit(void)
 
 The simplest syscall out of them all, we just set the process to
 terminated and perform a context switch in order to delete it, if we
-don\'t context switch it will just delete on the next timer call, which
-will lead to undefined behaviour, so don\'t do that.
+don't context switch it will just delete on the next timer call, which
+will lead to undefined behaviour, so don't do that.
 
 ### uint32_t get_pid(void)
 
-it\'s obvious what this does, get\'s the pid for the currently running
+it's obvious what this does, get's the pid for the currently running
 process that we call it from, we can return by moving the data into eax
 if this is the first thing that we push to the stack.
 
 ### void yield(void);
 
 simply just a manual way to perform a context switch from a user
-process. Doesn\'t specify which process to switch to just does the next
+process. Doesn't specify which process to switch to just does the next
 one in the list.
 
 ### void sleep(uint32_t ticks)
@@ -49,33 +49,33 @@ the the syscall will just mark it as sleeping, set for how long and then
 perform a context switch. You will have to put code in the timer that
 checks if a process should finish sleeping.
 
-### int write(int fd, void \*buff, size_t count)
+### int write(int fd, void *buff, size_t count)
 
 For now, this function will only be used to write to the terminal using
-fd = 1, this is because we don\'t currently have a file system and a way
-to set our file descriptors. I currently don\'t see a point to implement
+fd = 1, this is because we don't currently have a file system and a way
+to set our file descriptors. I currently don't see a point to implement
 an stderr right about now.
 
-### int read(int fd, void\* buff, size_t count)
+### int read(int fd, void* buff, size_t count)
 
 Like the previous, will just read input from the keyboard via stdin,
 like the sleep syscall, we will have to block the process until the
 count of characters has been entered, this will also require more data
 to be taken in by each process.
 
-### void\* sbrk (intptr_t increment)
+### void* sbrk (intptr_t increment)
 
-This function is used to grow the heap, we currently don\'t have one.
+This function is used to grow the heap, we currently don't have one.
 But we can just set the stack as a universal address that starts out as
 a page long, this will require more data to be stored in each process
 about how many pages are allocated to the heap and about the address
 where the heap ends. This function also returns the address at the end
-of the heap. We don\'t have to worry about allocation or handling of the
+of the heap. We don't have to worry about allocation or handling of the
 heap in this section. This will be handled in the next one.
 
 ## The implementation
 
-Here\'s the header for syscalls.h:
+Here's the header for syscalls.h:
 
     #ifndef SYSCALLS_H
     #define SYSCALLS_H
@@ -137,7 +137,7 @@ And here is the implementation file:
       return (void*)syscall(SYSCALL_SBRK, increment, 0, 0);
     }
 
-We also have the syscall function that\'s written in asm:
+We also have the syscall function that's written in asm:
 
 ``` language-x86
 [BITS 32]
@@ -154,7 +154,7 @@ syscall:
     ret
 ```
 
-Before we move into the the changes shown to the interrupt, it\'ll show
+Before we move into the the changes shown to the interrupt, it'll show
 you the updated `process_t` ahead of time:
 
     typedef struct {
@@ -308,7 +308,7 @@ infrastructure:
     }
 
 SYSCALL_EXIT, SYSCALL_GEETPID and SYSCALL_YIELD are all simple enough,
-so let\'s look at the next couple and i\'ll explain them:
+so let's look at the next couple and i'll explain them:
 
 ### SYSCALL_SLEEP
 
@@ -341,7 +341,7 @@ existing tick, if it is, we wake it up and set the process to ready.
 
 ### SYSCALL_WRITE
 
-As the comment states, it\'s a pretty mock version that writes based on
+As the comment states, it's a pretty mock version that writes based on
 size (as the syscall typically does). After this function we can
 basically set the priv level of the VGA buffer back to 0 as we now have
 a better way to write to VGA.
@@ -420,12 +420,12 @@ like in timer.c, but instead in keyboard.c:
     }
 
 All of the changes are in the default case for the switch statement, as
-you can see we just check if there is a character in c\[0\], as if this
-wasn\'t checked we would have undefined behaviour for characters like
-LGUI.\
-For this block of code, we check each process if it\'s blocked and if
+you can see we just check if there is a character in c[0], as if this
+wasn't checked we would have undefined behaviour for characters like
+LGUI.
+For this block of code, we check each process if it's blocked and if
 the size to take in is more than 0. Then we briefly change cr3 in order
-to store the current character for c\[0\] in the buffer, then if the
+to store the current character for c[0] in the buffer, then if the
 count has reached the size, then we reset the count and size and set the
 process to ready.
 
@@ -449,21 +449,21 @@ can just add this small piece of code to our create_uprocess:
 
 I just defined `USER_HEAP_START` in my mappings.h as `0x00A00000` which
 is some free space. Now that we have a heap, we can then make our
-function for growing it as defined in SYSCALL_SBRK.\
+function for growing it as defined in SYSCALL_SBRK.
 In this syscall we add the increment to the end of the heap. We then
 have a loop that iterates until the end of the heap is completely
 covered by the ammount of pages that are allocated; The contents of this
 loop just map the start of each page that is allocated to the heap.
 
-That\'s basically everything for our syscalls. The next stage will focus
+That's basically everything for our syscalls. The next stage will focus
 on making our user space even more useful by implementing our own
 version of the C standard library.
 
-\--DEV NOTES\-- current: -exit -getpid -yield -sleep -write -read -sbrk
+--DEV NOTES-- current: -exit -getpid -yield -sleep -write -read -sbrk
 may need spawn and wait when we get to shell spawn and wait when i make
-shell leads to this libc: \--memory: malloc free calloc realloc memcpy
-memmove memset memcmp \--string strlen strcmp strncmp strcpy strcat
-strchr strrchr strstr atoi \--output putchar puts printf (fputs??)
-\--character stuffs isalpha isdigit isalnum isspace islower isupper
+shell leads to this libc: --memory: malloc free calloc realloc memcpy
+memmove memset memcmp --string strlen strcmp strncmp strcpy strcat
+strchr strrchr strstr atoi --output putchar puts printf (fputs??)
+--character stuffs isalpha isdigit isalnum isspace islower isupper
 tolower toupper
 
