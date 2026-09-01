@@ -53,3 +53,20 @@
 - [Processes](10-processes/01-processes.md)
 - [Context Switching](10-processes/02-context.md)
 - [Scheduling](10-processes/03-scheduling.md)
+
+# Part XI: User
+
+- [User Space](11-user/01-user-space.md)
+- [System Calls](11-user/02-syscalls.md)
+- [libc](11-user/03-libc.md)
+
+# Part XII: Filesystem
+
+- [Introduction](12-filesystem/01-introduction.md)
+- [Drivers](12-filesystem/02-drivers.md)
+- [Filesystem](12-filesystem/03-filesystem.md)
+- [Filesystem Manager](12-filesystem/04-fs-manager.md)
+
+# Part XIII: Programs
+
+- [The Shell](13-programs/01-the-shell.md)

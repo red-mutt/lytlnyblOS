@@ -1,4 +1,4 @@
-# Part X : Paging and Virtual Memory
+# Paging and Virtual Memory
 
 ## Some context
 

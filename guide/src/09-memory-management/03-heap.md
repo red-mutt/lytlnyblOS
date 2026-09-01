@@ -1,4 +1,4 @@
-# Part XI : Kernel Heap
+# Kernel Heap
 
 ## What are we doing?
 

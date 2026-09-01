@@ -1,4 +1,4 @@
-# Part XIV: Scheduler
+# Scheduler
 
 ## Context
 
