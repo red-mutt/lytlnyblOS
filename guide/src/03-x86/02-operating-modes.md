@@ -1,4 +1,4 @@
-## x86 Operating Modes
+# x86 Operating Modes
 
 For this guide, we will work with two x86 modes: 16-bit
 real mode and 32-bit protected mode, but what exactly is an operating
