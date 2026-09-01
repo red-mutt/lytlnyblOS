@@ -7,7 +7,7 @@ code descriptor. The third is the kernel space data descriptor. We could
 also make descriptors for the user space, but I will refrain from doing
 that for now.
 
-First let's define the null descriptor which looks like this:
+First let's define the null descriptor, which looks like this:
 
 ```x86asm
 gdt_start:
@@ -67,13 +67,13 @@ P DPL DPL S E DC RW A
     segment, when zero it represents data
 -   **DC stands for Direction/Conforming** When set to 0 it's a
     non-conforming code segment, this means that only code running at
-    the correct privilege level may enter it, if DC was 1 then less
-    privileged code may jump into the segment
+    the correct privilege level may enter it, if DC was 1 then code 
+    running at the same or a lower privilege level may enter the segment
 -   **Read/Write (RW)** when set to 0 means executable only, but it can
     not be read, so code cannot be read as data, so we should set RW to
     1 so it can be executable and readable
--   **The access bit (A)** States whether the segment has been used, it
-    is automatically set by the CPU later.
+-   **The access bit (A)** states whether the descriptor has been accessed.
+    The CPU automatically sets this bit when the segment is accessed.
 
 We can see that the access byte, as the name implies, controls
 access.
@@ -91,7 +91,7 @@ G D L AVL
 -   **Default Operand Size (D)** being set to one states the segment is
     32 bits instead of 16
 -   **Long mode (L)** being set to 0 keeps us in 32 bits, if it's 1 it
-    would let us go into 64 bit long mode on x86-64 systems
+    indicates a 64 bit code segment in long mode
 -   **The Available (AVL)** flag is ignored by the CPU, so let's
     just set it to 0
 
@@ -139,8 +139,8 @@ enter_protected:
     jmp CODE_SEG:p_mode_main
 ```
 
-This is essentially 3 things, we first use `cli` which disables our BIOS
-interrupts, we then load the descriptor table with `lgdt` we then set
+This is essentially 3 things, we first use `cli` which disables maskable 
+hardware interrupts, we then load the descriptor table with `lgdt`, and then we set 
 the protection enable bit in the control register, after this we then
 perform a far jump into the `p_mode_main` label (which we will define
 later) using the code descriptor
@@ -160,16 +160,15 @@ hang:
 ```
 
 This is our code for our `p_mode_main`, it's simple, we just set the data
-segment similarly to how we did with the `CODE_SEG` earlier, if we wanted
-we could replace `CODE_SEG` with 08h. as this would be the value
-calculated by `gdt_code - gdt_start` we also load that into all our
-other special segment registers
+segment registers. If we wanted, we could replace `CODE_SEG` with `08h`,
+as this is the value calculated by `gdt_code - gdt_start`. We then load
+the data segment selector, 10h, into our other segment registers.
 
 And that should be all for going into protected mode, our full code
 should look like this:
 
 ```x86asm
-; no org code starts at 0x0900 though
+; no org code starts at 0x9000 though
 [bits 16]
 start:
     mov ax, cs
@@ -244,7 +243,7 @@ gdtr:
 
 Let's take away our -s and -S flags from our Makefile and then run the
 program and see what happens. What is most likely happening for you is
-that it looks like a bunch of text is flashing on the screen this is our
+that it looks like a bunch of text is flashing on the screen. This is probably our
 triple fault, if not and the program hangs, you're probably in real
 mode and can skip what I'm about to talk about next.
 

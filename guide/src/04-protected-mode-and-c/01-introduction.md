@@ -37,7 +37,7 @@ start:
     call print_string
 
     call load_kernel_from_disk
-    jmp 0900h:0000 ; gives control to the kernel by jumping to it's starting point.
+    jmp 0900h:0000 ; gives control to the kernel by jumping to its starting point.
 
 load_kernel_from_disk:
     mov ax, 0900h
@@ -46,11 +46,11 @@ load_kernel_from_disk:
     mov ah, 02h ; service number, 
     mov al, 01h ; number of sectors we want to read from (only simple kernel for now, so less than 512 bytes)
     
-    mov ch, 0h ; number of track we would like to read from, is just 0.
+    mov ch, 0h ; cylinder number, which is 0
     mov cl, 02h ; sector number that we would like to read its content, this is the second sector
 
-    mov dh, 0h ; the type of disk we would like to read from, 0h means we are reading from a floppy disk. 
-    mov dl, 80h ; this is the hard disk we are reading from, 80h means hard disk #0, 81h would be hard disk #1
+    mov dh, 0h ; head number, 0h means the first head
+    mov dl, 80h ; drive number, 80h means the first hard disk, 81h would be second
 
     mov bx, 0h ; memory adress that content will be loaded into
     int 13h ; 13h provides services related to hard disk
@@ -133,8 +133,8 @@ done:
 hello_string db 'Hello World!, i am lytlnyblOS, running in real mode', 0
 ```
 
-As discussed in the previous part where we covered all our content
-needed to get out operating system into protected mode. 
+As discussed in the previous part, where we covered all our content
+needed to get our operating system into protected mode. 
 You may notice that currently we are still relying on
 BIOS interrupts. These BIOS interrupts are actually pretty powerful, and
 you can use them to do many things (like write video games that run
@@ -159,7 +159,7 @@ itself. In our QEMU emulator this would look like a bunch of text
 flashing on the screen, this is because the system is continually
 rebooting itself over and over again.
 
-The debugger we are going to be using is GDB, make sure to install it
+The debugger we are going to be using is GDB, so make sure to install it
 before continuing, or install whatever debugger you prefer.
 
 With the compiled state of our bootloader and kernel as of now, using
@@ -174,12 +174,12 @@ a lot more context when debugging.
 
 Binary files (which is what we are compiling to now) cannot give
 functions names, labels and such so the method I am using to get access
-to them is I am going to be compiling to the .elf format, I will then be
+to them is going to be compiling to the .elf format, I will then be
 copying the .elf compilation back into .bin this is because if we use
 the .elf file we would have to refactor some of the code in our
 bootloader.
 
-To compile to elf must make a linker script. This tells the linker where
+To compile to ELF must make a linker script. This tells the linker where
 to place things in memory. A linker is a program that combines object
 files into a final executable and fixes up all the addresses.
 

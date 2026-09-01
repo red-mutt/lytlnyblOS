@@ -7,10 +7,12 @@ callee
 Cybersecurity
 GDB
 Hussain
+ISRs
 LDTs
 Limine
 Makefile
 Makefiles
+maskable
 Mohammed
 NASM
 OSDev

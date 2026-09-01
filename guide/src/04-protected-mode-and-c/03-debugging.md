@@ -1,10 +1,10 @@
 ## Debugging our issue
 
 Let's add our flags back and debug with GDB, when debugging with GDB we
-will sometimes want to see the next instructions using the program
-counter, but this will not work as we have to factor in the address
-specified by the code segment. (I'm pretty sure this is only a quirk
-with real mode by the way). `x/20i $pc` (which shows the next 20
+will sometimes want to see the next instructions using the program counter,
+but in real mode we have to account for segment base when calculating the 
+physical address. (I'm pretty sure this is only a quirk with real mode 
+by the way). `x/20i $pc` (which shows the next 20
 instructions) should become: `x/20i (($cs * 16) + $pc)` I have made a
 `.gdbinit` script to access these commands easier:
 
@@ -51,8 +51,8 @@ print/x $eax
 print/x $eip 
 ```
 
-first states info of all registers, last two show info of specific
-registers
+The first shows information about all registers, while the last two
+show information about specific registers
 
 ### Disassemble instructions/functions
 
@@ -89,7 +89,7 @@ info breakpoints
 delete 1
 ```
 
-This is how we make get info about and delete breakpoints.
+This is how we make, get information about, and delete breakpoints
 
 ### Watching execution
 
@@ -116,15 +116,16 @@ output:
 0x9019 <enter_protected+1*>:   0x0f    0x01    0x16    0x8e    0x90    0x0f    0x20    0xc0
 ```
 
-`0xf 0x1 0x16` is the opcode for our `lgdt` instruction `0x8e 0x90` is our
-operand which decodes to `0x908e` (and the other stuff being the next
-instruction). This *IS* the address of GDTR, but this is not how we are
-supposed to use `lgdt`, as we are supposed to use an offset as our code
-segment is set to `0x9000` at the `start` label. We much change our
+`0xf 0x1 0x16` is the opcode for our `lgdt` instruction. `0x8e 0x90` is our 
+operand, which decodes to `0x908e` (with the other bytes being the next instruction).
+`0x908e` is the address of `gdtr`, but this is not how we are supposed to use `lgdt`,
+because in real mode this address is interpreted as an offset from the `DS` 
+segment base. Our code is loaded at physical address `0x9000`, so we need to use 
+the offset of `gdtr` relative to start instead. We much change our
 instruction to:
 
 ```x86asm
-lgdt [gdtr - start] ; load GDT registor with start address of GDT
+lgdt [gdtr - start] ; load GDTR with the GDT's address and size
 ```
 
 We may also notice that we are not printing correctly too, this is the
@@ -134,8 +135,8 @@ same issue, so let's change that too:
 mov si, hello_string - start
 ```
 
-We should now be in real mode! Another good debugging technique
-is checking other people's implementations, that's how i originally
+We should now be in protected mode! Another good debugging technique
+is checking other people's implementations, that's how I originally
 solved this issue. But it's also solvable via GDB. If you're thinking
 "How could I even possibly realize that" Then welcome to bare metal
 programming :)

@@ -1,14 +1,15 @@
 ## How do we enter C?
 
-When compiling C code, we can not use the compiler on our current
-system, we must make a cross-compiler. I will not be instructing you on
+When compiling C code for our operating system, we cannot use the 
+compiler on our current system directly; we need a cross-compiler. 
+I will not be instructing you on
 how to do this as it varies a lot based on the OS you are on. I will give
 a fair warning that when building the `gcc` cross-compiler you can fail to
-compile due to the version of `gcc-c++` you are building with being too
+compile because the version of `gcc-c++` you are building with is too
 new, and you may need an older version. Here's a resource on setting up
-a cross-compiler [here.](wiki.osdev.org/GCC_Cross-Compiler)
+a cross-compiler [here.](https://wiki.osdev.org/GCC_Cross-Compiler)
 
-Once we have our cross compiler we can simply have this as our
+Once we have our cross-compiler we can simply have this as our
 `kernel_main.c` file:
 
 
@@ -25,7 +26,7 @@ void kernel_main(void)
 }
 ```
 
-This simply just Writes a green character to our VGA output we must then
+This simply just writes a green character to VGA text memory. We must then
 link the compilation of this in with our Makefile using our cross-compiler:
 
 ```makefile
@@ -70,6 +71,6 @@ p_mode_main:
     call kernel_main
 ```
 
-And then if everything's done correctly we will be in C signified by
+And then if everything's done correctly we will be in C, signified by
 the first character on our screen being replaced by a green C
 
