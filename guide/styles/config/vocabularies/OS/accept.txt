@@ -8,12 +8,15 @@ Cybersecurity
 GDB
 Hussain
 ISRs
+keymap
+keymaps
 LDTs
 Limine
 Makefile
 Makefiles
 maskable
 Mohammed
+multibyte
 NASM
 OSDev
 print_string

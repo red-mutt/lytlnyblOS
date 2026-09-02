@@ -155,7 +155,7 @@ void keyboard_set_shift_keymap(void)
 void keyboard_extended_scancodes() {
     uint8_t scancode = inb(PS2_DATA);
 
-    /* LGUI */
+    /* This only handles the LGUI press for now */
     if (scancode == 0x5B) {
     }
 }
@@ -190,11 +190,15 @@ void keyboard_handler () {
     }
     if (scancode == EXTENDED_SCANCODE) {
         keyboard_extended_scancodes();
+        return;
     }
     if (scancode & KEY_RELEASED) {
         return;
     }
 
+    if (scancode >= 128) {
+        return;
+    }
 
     char c[2];
     c[0] = keymap[scancode];

@@ -2,8 +2,8 @@
 
 ## An overview of the hardware
 
-In this part we are technically writing two drivers, one is for a PS/2
-controller, this uses serial communication to talk to a PS/2 Keyboard.
+In this part we are technically writing two drivers. One is for the 
+PS/2 controller, which provides an interface for communicating with the keyboard.
 Writing for this driver includes:
 
 -   Reading bytes from the controller
@@ -23,9 +23,10 @@ which:
 
 With this being higher level after we complete the first task.
 
-There's only 2 ports we need for the controller `0x60` for reading and
-writing data, and `0x64` which gives the status bits when reading and
-allows us to write commands to it when writing.
+There's only two ports we need for the controller. `0x60` is the data port,
+which we use to read data from and send data to the keyboard. `0x64` is the
+status/command port. We read the controller's status from it and send controller
+commands to it.
 
 Reading from port `0x64` gives us:
 
@@ -43,7 +44,7 @@ Bit 3
 Command/Data
 
 Bit 4
-Keyboard lock
+Keyboard interface disabled
 
 Bit 5
 Mouse output
@@ -55,29 +56,41 @@ Bit 7
 Parity Error
 ```
 
-There's only really 2 that are important. These being output and input
-buffer full, If output buffer full is set, then `0x60` contains data that
-is waiting, if input buffer is set then the controller is busy, and we
-can't write yet. Another thing to note is that when the output buffer
-is full, then IRQ1 happens.
+Two bits here are important. These are the output and input
+buffer status bits. If the output buffer bit is set, then `0x60 contains
+data that is waiting to be read. If the input buffer bit is set, then the controller
+is still processing a command or data, so we should wait before writing to it. 
+When keyboard data is placed into the controller's output buffer,
+the controller can raise IRQ1 to notify the CPU that data is available.
 
 When a key is pressed, the keyboard generates a scan code, the
 controller receives it and then stores it whilst also raising IQR1, then
 we can receive it and decode. The keyboard does not send ASCII, it sends
-scan-codes. These are numbers that symbolize interactions with the
-keyboard. For example `0x1E` symbolizes A is pressed, and `0x9E`
-symbolizes release.
+scan codes. These are numbers that symbolize interactions with the
+keyboard. For example, keyboards can use different scan code sets to represent 
+keys. We will be using Scan Code Set 1, which is the traditional set used
+by the PC/AT keyboard interface. In this set, `0x1E` represents the `A` key 
+being pressed, while `0x9E` represents the A key being released.
 
-Some scan-codes have multiple bytes (like right control) this is
-symbolized by the 0xE0 prefix. The pause key is 8 bytes long, but we
-will be ignoring this multimedia key of course.
+Some keys use extended scan code sequences containing multiple bytes. For 
+example, the right Control key uses the `0xE0` prefix. The `0xE0` byte tells us 
+that the following byte belongs to an extended scan code sequence. 
+For example the pause key uses a special multibyte 
+scan code sequence, but we will ignore that key for now (as well as many others).
 
-For init we:
+When the `0xE0` scan code is received, it is not itself the key we want to handle. It's a 
+prefix telling us that another byte follows. For our simple implementation,
+`keyboard_extended_scancodes()` reads the next byte and checks whether it is
+the left GUI key. You can expand this later if you ever want more extended keys.
 
-1.  Flush any pending data from the controller's output buffer
-2.  Send 0xF4 to the keyboard to enable scanning (the BIOS may have
-    already done this but just good practice)
-3.  Install the IRQ1 handler
+For our simple implementation of initialization, we enable keyboard scanning by
+sending `0xF4` and initialize our keymaps that will be mapping a scan code 
+to a character. The `0xF4` command is sent through the 
+controller's data port (`0x60`), but it's a command understood by the keyboard
+itself. The controller simply forwards it to the keyboard. A complete PS/2 initialization would
+also wait for the controller's input buffer to be clear, 
+check the controller's status, flush pending data, and handle the keyboard's responses to commands.
+We will keep those details simple for now.
 
 Now let's get writing, starting with the header file which is all that
 we need for our full implementation that we will make in this chapter:
@@ -90,17 +103,17 @@ we need for our full implementation that we will make in this chapter:
 #define PS2_COMMAND 0x64
 
 #define ENABLE_SCANNING 0xF4
-#define DISABLE SCANNING 0xF5
+#define DISABLE_SCANNING 0xF5
 #define SET_LED 0xED
 
 #define KEY_RELEASED 0x80
 #define EXTENDED_SCANCODE 0xE0
 
 #define SHIFT_PRESS 0x2A
-#define L_CTRL_PRESS 0x9C
+#define L_CTRL_PRESS 0x1D
 
-#include 
-#include 
+#include <stdint.h>
+#include <stdbool.h>
 
 void keyboard_handler(void);
 void keyboard_init(void);
@@ -112,11 +125,11 @@ void keyboard_extended_scancodes(void);
 #endif
 ```
 
-With the KEY_RELEASED definition, this is OR'd with a respective key's
-scan-code to signify that this key has been released, this will be
-ignored other than for keys that we hold. We then have our data and
+In Scan Code Set 1, the release scan code for most ordinary keys is formed by
+setting the high bit of the code. We use `KEY_RELEASED` (`0x80`) to check for this.
+We then have our data and
 command ports and some commands, the SET_LED command is not needed. All
-our functions are pretty self explanatory when we look at the
+our functions are pretty self-explanatory when we look at the
 implementation.
 
 Let's look at said implementation:
@@ -222,19 +235,20 @@ void keyboard_handler () {
 }
 ```
 
-We then also need to call `keyboard_handler()` this in our irq handler
+We then also need to call `keyboard_handler()` this in our IRQ handler
 on case 1.
 
 This is all we really need for our keyboard, we make an array that maps
-each scan-code to a respective key. Our init function is small, we just
+each scan code to a respective key. Our init function is small, we just
 enable scanning (which potentially may already have been done by the
-BIOS) and set our key-map. In our handler we get the scan-code and if it
-contains the KEY_RELEASED definition we return. If not released we write
-the key to the screen.
+BIOS) and set our keymap. In our handler we get the scan code and if it
+contains the `KEY_RELEASED` definition we return. If not released we write
+the key to the screen. Not every scan code has an entry in our keymap.
+Undefined entries contain 0, so our later code should ignore scan codes
+that we don't have a character for.
 
-Also, this key-map assumes we are in set 1, this is the traditional PC AT
-layout which is normally provided by BIOS, there are other sets, but we
-ignore them for now.
+This keymap assumes we are using Scan Code Set 1. other scan code
+sets exist, but we will ignore them for now.
 
 Really you could move on from this chapter with this basic
 implementation and build up your own from this template with modifier
@@ -398,11 +412,11 @@ void keyboard_set_shift_keymap(void)
     shift_keymap[0x39] = ' ';
 }
 
-void keyboard_extended_scancodes() {
+void keyboard_extended_scancodes(void) {
     uint8_t scancode = inb(PS2_DATA);
 
     vga_text_write_hex(&terminal, scancode);    
-    /* LGUI */
+    /* This only handles the LGUI press for now */
     if (scancode == 0x5B) {
         vga_text_writeline(&terminal, "LGUI PRESSED");
     }
@@ -430,7 +444,7 @@ bool keyboard_modifier_keys(uint8_t scancode) {
     return false;
 }
 
-void keyboard_handler () {
+void keyboard_handler(void) {
     uint8_t scancode = inb(PS2_DATA);
     
     if (keyboard_modifier_keys(scancode)) {
@@ -438,11 +452,15 @@ void keyboard_handler () {
     }
     if (scancode == EXTENDED_SCANCODE) {
         keyboard_extended_scancodes();
+        return;
     }
     if (scancode & KEY_RELEASED) {
         return;
     }
 
+    if (scancode >= 128) {
+        return;
+    }
 
     char c[2];
     c[0] = keymap[scancode];
@@ -472,16 +490,17 @@ void keyboard_handler () {
 
 In our handler now we first call the modifier key function and this
 returns true if a modifier key has been pressed and handles it
-accordingly, if one is pressed we return as to not go through undefined
-behaviour, we then check for extended scan codes and handle them. I have
+accordingly, if one is a modifier key, we return because modifier keys
+are handled separately from normal character keys. I have
 added one, this being `LGUI`, I could have added more, but I haven't as
-we really have no use for them, and our functions are pretty scalable
-right now, and we can add whatever we want.
+we have no use for them. We can add move extended keys later using the same approach
 
-With our shift key we also have a separate key map. You could make a
-separate implementation if you wish to save memory. All the keys that
-aren't regular characters are pretty basic other than the backspace, I
-made some new functions for this in our VGA code. Let's take a look:
+With our Shift key we also have a separate keymap. This makes the code
+simple to understand, although it uses some extra memory. Later, we could
+use another approach to avoid storing a second full keymap. The keys
+that aren't regular printable characters are handled with simple special
+cases, such as Backspace, Enter, Tab and Escape.
+I made some new functions for this in our VGA code. Let's take a look:
 
 ```c
 void vga_text_backspace(vga_text* terminal) {
@@ -505,10 +524,9 @@ char vga_text_getchar(vga_text* terminal) {
 }
 ```
 
-The backspace function moves the terminal cursor back once and deletes
-the character if we are deep into a row and have text previous to us. If
-we are at the start of a row, we then go back up to the row above at the
-further right most column.
+The backspace function moves the terminal cursor back by one character and replaces
+that character with a space. If we are at the start of a row, we move to the previous
+row and then move toward the end of that row.
 
 And then this is basically everything to do with keyboard management,
 some things aren't implemented (like alt) but we don't
@@ -516,5 +534,5 @@ really have much use for these keys right about now, and we can easily
 add them later, which isn't that much of a big deal anyway as we will
 probably have to refactor a lot of the code when we make a shell.
 
-We will now move onto memory management.
+We will now move on to memory management.
 
