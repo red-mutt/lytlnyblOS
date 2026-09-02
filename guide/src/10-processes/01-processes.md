@@ -2,18 +2,17 @@
 
 ## A little word on the next 3 chapters
 
-The previous 3 chapters we had were each making 3 major components of
+The previous 3 chapters we had were each making one of the 3 major components of
 memory management. These next 3 parts are going to be formatted in the
 same way but instead of making memory management we are making the
 process management subsystem. Currently, our kernel just makes the CPU
-execute one instruction after another from one stack, there is no such
-thing as multitasking and running multiple things at the same time,
+execute one instruction after another from one stack. Multitasking and 
+running multiple things at the same time currently doesn't exist;
 this is what we want to create.
 
 After making tasking the CPU still executes one instruction at a time,
-but the tasking system continually swaps between different execution
-contexts quick enough to the point where they seem to run
-simultaneously.
+but the tasking system continually swaps between different execution contexts
+quickly enough that they seem to run simultaneously.
 
 ### What is a process?
 
@@ -82,7 +81,7 @@ setting the initial CPU state (as the process has never run before). And
 then it must be added to the process list.
 
 The process list is just the way the kernel stores every process that
-exists, just like before with the heap, we use a linked list,
+exists. Just like before with the heap, we use a linked list,
 you have freedom here, you can use an array if you want, you have
 some issues deciding how big it should be, what happens when it fills,
 and how entries are removed.
@@ -101,12 +100,12 @@ really need to do this right about now.
 
 ### THE KERNEL IS RUNNING!?!?
 
-The kernel, at this stage in or OS is running an infinite loop, how do
+The kernel, at this stage in our OS is running an infinite loop, how do
 we take this already running code and build it into our tasking
 structure, to cope with this, when we initialize the process manager, we
 must immediately create a `process_t` representing the current kernel
-execution. Later, when we make the context switcher, we will already
-have somewhere to save the kernel's registers.
+execution. Later, when we make the context switcher, we will already have somewhere
+to save the kernel's register state.
 
 This is pretty much all we need to know to create this stage. Let's get
 making.
@@ -119,8 +118,8 @@ making.
 #ifndef PROCMAN_H
 #define PROCMAN_H
 
-#include 
-#include 
+#include <stdint.h>
+#include <stddef.h>
 
 #include "../kernel/interrupts.h"
 #include "../memory/vmm.h"
@@ -201,9 +200,9 @@ with our interrupts, but instead we removed things that are useless like
 the error code and interrupt number.
 
 For the data structure for the processes, we simply have the PID, the
-registers which isn't a pointer but the data itself is embedded, the
+registers (which isn't a pointer but is data embedded within the process structure), the
 state of the process a pointer to the next process, a pointer to the
-page director and finally a pointer to the stack.
+page directory and finally a pointer to the stack.
 
 Our functions then are pretty simple, we have initialization, creation,
 destruction and searching.
@@ -314,8 +313,8 @@ changed is in the `p_mode_main` label. We change the value that we move
 into esp from `0x9000` to `kernel_stack_top`. At the bottom we then have
 another addition, this is just memory that we reserved for the main
 kernel stack. As before when we just set `ESP` as `0x9000`, the stack
-didn't have a defined size. We can then later use the
-`kernel_stack_bottom` to make a pointer to the bottom of the kernel stack.
+didn't have a defined size. We can then later use 
+`kernel_stack_bottom` to get a pointer to the bottom of the kernel stack.
 
 ### Implementation
 
@@ -446,6 +445,11 @@ set the next process to NULL too. Next the stack pointer is set to a
 pointer of the bottom of the kernel stack. And then we set the
 `current_process` and `process_head` accordingly.
 
+At this point, the register values stored in `kernel_process->regs` are just
+an initial placeholder. We haven't switched away from the kernel yet, so we haven't
+captured its actual CPU state. The context switcher will be responsible for saving
+the real register values when we switch away from the current process.
+
 ### `create_kprocess`
 
 The point of this function is not to create a process exactly how we
@@ -454,12 +458,12 @@ want it, but to create a base that we can use later. First we use
 the heap. Next we then store the PID and state accordingly.
 
 The 16Kib stack can then also be allocated using the heap too. When we
-implement user processes we will probably want to map the pages our self
+implement user processes we will probably want to map the pages ourselves
 which will give us more control over the address spaces, as we have to
 control page permissions and stack size.
 
-We then set general purpose registers to 0, set `EIP` to a pointer to the
-task address (which is given to the function). And esp is set to the top
+We then set general purpose registers to 0, set `EIP` to the task address
+(which is given to the function). And esp is set to the top
 of the stack (as stack grows downward in memory). CS and DS are then set
 to the code and data segments that we created back when we created our
 GDT. We then give a sensible `EFLAGS` value and set the page directory
@@ -473,7 +477,7 @@ to the end.
 
 For this function, if the process is null or if it's running then we
 return without doing anything.
-If the targeted process is first in the memory we skip over it and free
+If the targeted process is first in the list we skip over it and free
 the process's stack and the process itself, and then return.
 
 If it's not the first in the list we then traverse and if we can find
@@ -508,7 +512,7 @@ return, if we don't find anything, we just return NULL.
     }
 ```
 
-Here's some simple code that we can put at the end of main to
-test our processes, this should print out that everything is working.
-And now we can move onto context switching.
+Here's some simple code that we can put at the end of `main` to test our 
+processes. This should print out that everything is working.
+Now we can move onto context switching.
 

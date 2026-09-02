@@ -11,6 +11,7 @@ ISRs
 keymap
 keymaps
 LDTs
+libc
 Limine
 Makefile
 Makefiles
@@ -22,4 +23,6 @@ OSDev
 print_string
 printing_finished
 QEMU
+syscall
+syscalls
 Tanenbaum

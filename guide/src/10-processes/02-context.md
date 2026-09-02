@@ -2,13 +2,13 @@
 
 ## Context
 
-Not much context is needed for this section, all we need to know is that
-what we are making is simply used to switch the process
+Not much context is needed for this section, all we need to know
+is that what we are making is simply used to switch between the process
 data structures that we have made.
 
 Actually there's one major issue that comes with making a context
 switcher, and we experienced it partially when creating the main kernel
-process. This is the issue of how can we get the ESP and EIP values when
+process. This is the issue of how we can get the `ESP` and `EIP` values when
 the code currently being executed is switching the process. We
 wouldn't be able to get ESP and EIP for our actual process that we want
 to be saving.
@@ -17,7 +17,7 @@ The solution for this has been lying right under our noses. It's
 interrupts, these save a state of the CPU when called and then return to
 the previous state by popping out the `registers_t` structure (the one
 that we defined in the interrupts file, not the process manager file).
-We won't have a specific interrupt for the context manager, we will
+We won't have a specific interrupt for the context switcher, we will
 just use the timer for now, as this would be where we handle scheduling
 too.
 
@@ -30,7 +30,7 @@ Our header is small:
 #define CONTEXT_H
 
 #include "../tasks/procman.h"
-#include 
+#include <stdint.h>
 
 
 void context_switch(kprocess_t* old_process, 
@@ -42,9 +42,11 @@ void save_context(kprocess_t* process, registers_t* regs);
 void load_context(kprocess_t* process, registers_t* regs);
 
 #endif
+```
 
 And the C file here also doesn't really need much explanation either
 
+```c
 #include "context.h"
 
 void save_context(kprocess_t* process, registers_t* regs) {
@@ -85,6 +87,12 @@ void context_switch(kprocess_t* old_process, kprocess_t* new_process, registers_
     load_context(new_process, regs);
 }
 ```
+
+Notice that `context_switch()` itself doesn't directly change the CPU's registers.
+Instead, it changes the values inside the `registers_t` structure that
+the interrupt handler will later restore. This works because the context switch is 
+happening from inside a timer interrupt, so the interrupt return mechanism gives
+us a way to load the new process's saved CPU state.
 
 We then also need to make an infrastructure for calling these functions
 using our timer, I'll just paste the full edited file, seeing as it's
@@ -154,18 +162,18 @@ extern volatile uint32_t old_process_pid;
 extern volatile uint32_t new_process_pid;
 ```
 
-We can then call the context switch manually from anywhere in our code.
+We can then request a context switch from anywhere in our code.
 
 If you're confused how loading the process works by simply just loading
 process data into the `registers_t` structure, this is because when the
 IRQ wants to return after the timer interrupt is done, it pops all the
-data from the `register_t` structure and then uses this to return to the
+data from the `registers_t` structure and then uses this to return to the
 previous place in code execution, so we can also use interrupts to our
 advantage to load processes, as well as save them.
 
 ## Simple test
 
-I'll just show you the whole of my main to show you how simple
+I'll just show you the whole of `main` to show you how simple
 of a test this is.
 ```c
 #include "vga_text.h"
@@ -177,7 +185,7 @@ of a test this is.
 #include "../memory/heap.h"
 #include "../tasks/procman.h"
 
-#include 
+#include  "<stdint.h>
 
 vga_text terminal;
 
@@ -223,7 +231,7 @@ void kernel_main(void)
 
     kfree(numbers);
 
-    kprocess_t* test_proc= create_kprocess(test_process);
+    kprocess_t* test_proc = create_kprocess(test_process);
     old_process_pid = 1;
     new_process_pid = test_proc->pid;
     context_switch_requested = true;
@@ -236,13 +244,13 @@ void kernel_main(void)
 }
 ```
 
-As you can see we just define a process for our `test_process` function,
+As you can see, we just define a process for our `test_process` function,
 we switch, and then switch back. This should work. You may notice that
 there is also a new function, from the timer, this being `timer_wait_ms`
-(remember to define this in the timer's header too). The reason this
-exists and is used is that the code for printing that we are back in
-main will happen before the context switch happens, this is because it
-takes a couple ms for the timer to tick and then perform the context
-switch. Just wait a little before switching. If everything is good
+(remember to define this in the timer's header too). The reason this exists and is
+used is that the code for printing that we are back in main will happen before
+the context switch happens. This is because the context switch only happens
+when the timer interrupt fires. We therefore wait for a little while
+to give the timer a chance to perform the context switch. If everything is good
 you should be seeing the text showing appropriately.
 

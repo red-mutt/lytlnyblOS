@@ -3,15 +3,14 @@
 ## Context
 
 The scheduler currently is going to be simple to make, this is because we
-already have our context switcher and process manager. The scheduler just
+already have our context switcher and process manager. The scheduler 
 simply decides what process ought to be run next. When making the scheduler, we
-can abstract away considering things like, page allocation, the process's
-stack, the heap and all sorts of stuff, the only things that we need to
-consider are the current process, the linked list of all processes and each
-process's state.
+can abstract away things like page allocation, the process's stack, the 
+heap and all sorts of other stuff. The only things that we need to consider are the
+current process, the linked list of all processes and each process's state.
 
 The scheduling algorithm we are going to be using is round-robin, if you are
-unfamiliar with this it gives each process a time slice (basically an amount
+unfamiliar with this it gives each process a time slice (basically a number
 of ticks) to execute, and then you cycle through executing all the available
 processes for the given time slice.
 
@@ -80,13 +79,21 @@ This is just a traversal algorithm that just cycles through the list until it
 finds the next ready process. If it traverses to the running process again then
 it just returns that instead.
 
+> **_NOTE:_** This implementation assumes that there will always be a `PROCESS_RUNNING` process
+in the list. If that isn't the case, the traversal can loop indefinitely. This is something you may want to
+handle properly later if you wish to make the scheduler more complex.
+
 ### `schedule`
 
-This is the main thing we are calling from the timer to schedule. If
+This is the main thing we are calling from the timer to perform scheduling. If
 our scheduler tick count goes up to the value we have in our `time_slice` then we
 execute the bulk of the function. This is just where we find the next process
 using the `get_next_process` function, and then if it's not the same as our
 current process we perform a context switch.
+
+The important thing to remember is that the scheduler does not perform the 
+context switch itself. It decides which process should run next, and then the context
+switcher handles actually switching to it.
 
 ## Refactoring timer and main
 
@@ -96,6 +103,7 @@ Let's have a look at the new timer:
 #include "timer.h"
 #include "interrupts.h"
 #include "vga_text.h"
+#include "scheduler.h"
 
 volatile uint32_t ticks = 0;
 static uint32_t freq;
@@ -153,7 +161,7 @@ changes to main, this is also just removing stuff:
 #include "../memory/heap.h"
 #include "../tasks/procman.h"
 
-#include 
+#include <stdint.h>
 
 vga_text terminal;
 
@@ -198,7 +206,7 @@ void kernel_main(void)
 
     kfree(numbers);
 
-    kprocess_t* test_proc= create_kprocess(test_process);
+    kprocess_t* test_proc = create_kprocess(test_process);
     timer_wait_ms(10);
 
     vga_text_writeline(&terminal, "back in main");
@@ -208,5 +216,5 @@ void kernel_main(void)
 }
 ```
 
-And this should work, next up is user management! We will next actually have an 
+And this should work. Next up is user management! We will next actually have an 
 operating system and not just a kernel.
