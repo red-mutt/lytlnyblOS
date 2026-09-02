@@ -14,16 +14,17 @@ for a specified amount of time, we will also use this if we want to
 schedule tasks, and finally we can also implement timeouts and many more
 things.
 
-The timer is also vary simple to implement, as we just would really only
+The timer is also simple to implement, as we just would really only
 make 3 functions. One for initialization, one for handling the ticks,
 and one for retrieving the current tick. Nice! The code I
-present here will be similar to that sort VGA section I provided
+present here will be similar to that short VGA section I provided
 before.
 
 To communicate we will be using the same `inb`/`outb` functions.
-The pit always receives an internal clock of around 1193182 Hz so we
-need to calculate a divisor by doing 1193182/desiredfreq. It will then
-count from our divisor to 0 every CPU tick.
+The PIT receives an input clock of around 1193182 Hz so we need to
+calculate a divisor by doing `1193182 / desired_frequency`. The PIT then
+counts down using this clock and generates an interrupt when the counter 
+reaches zero.
 
 Here is the header code for timer.h
 
@@ -69,34 +70,38 @@ void timer_init(uint32_t frequency);
 
 void timer_handler(void);
 
-uint64_t timer_get_ticks(void);
+uint32_t timer_get_ticks(void);
 
 #endif
 ```
 
 Like with ICW, i have definitions for most commands and addresses for
-the PIT, the mode we are using is mode 3 which is the square wave mode
-the PIT can only receive 8 bytes at a time, which is why we have those
-accessing modes, with the latch being where we pause operation in order
-to read the count within the PIT, this is because we can read the
-low byte and then the high byte can change by the time we read that, so
-we need to pause.
+the PIT, the mode we are using is mode 3 which is the square wave mode.
+The PIT's data ports are 8 bits wide, but our divisor is 16 bits. This
+is why we have different access modes. We use `PIT_ACCESS_LOHIBYTE`,
+which tells the PIT that we will send the divisor in two parts: 
+the low byte first and the high byte second. The latch mode allows
+us to capture the current count so that we can safely read it.
+Without latching the value, the counter could change between
+reading the low byte and reading the high byte.
 
-Here\'s what the modes do for the PIT
+We don't need the latch for our timer yet, but it can be useful later
+if we want to read the current count from the PIT.
 
--   **Mode 0** is a mode one shot timer that executes after a certain
-    amount of time. This is not what we need
+Here's what the modes do for the PIT
+
+-   **Mode 0** is a one-show timer that generates its output after 
+    a certain amount of time. This is not what we need
 -   **Mode 1** is the same as 0 but only starts or restarts when there
     is an external trigger
--   **Mode 2** is a rate generator which is used for baud rate
-    etc
--   **Mode 3** is the same as 2 but is a square wave where 50% of time
-    is spent on and 50% of time is off
+-   **Mode 2** is a rate generator that repeatedly generates pulses at a regular rate.
+-   **Mode 3** is similar to Mode 2, but generates a square wave. This
+    is the mode we will use for our regular timer interrupts.
 -   **Mode 4** is a software triggered strobe
 -   **Mode 5** is the same as 4 but from an external hardware trigger
 
-Another thing to note is that the PIT has 3 channels which can all be
-used for separate timers
+Another thing to note is that PIT has 3 channels, which can be used
+for different timing purposes. We are using channel 0 for our system timer.
 
 Now let's look at all of our implementations:
 
@@ -106,13 +111,11 @@ Now let's look at all of our implementations:
 #include "vga_text.h"
 
 volatile uint32_t ticks = 0;
-static uint32_t freq;
 
 extern vga_text terminal;
 
 void timer_init(uint32_t frequency) {
-    freq = frequency;
-    uint16_t divisor = 1193182 / frequency;
+    uint16_t divisor = PIT_BASE_FREQUENCY / frequency;
 
     /* tell pit how we send the divisor value and the mode*/
     outb(PIT_COMMAND, PIT_ACCESS_LOHIBYTE | PIT_MODE3 | PIT_CHANNEL0 | PIT_BINARY);
@@ -125,33 +128,36 @@ void timer_init(uint32_t frequency) {
     io_wait();
 }
 
-void timer_handler() {
+void timer_handler(void) {
     ticks++;
     if ((ticks % 100) == 0) {
         vga_text_writeline(&terminal, " 1 second ");
     }
 }
 
-uint64_t timer_get_ticks() {
+uint32_t timer_get_ticks() {
     return ticks;
 }
 ```
 
-In our init we set the divisor and send a command to change the low byte
-then the high byte, then set the PIT_MODE to 3 on channel 0 and make
-sure that the value in the PIT is treated as binary. BCD means binary
-coded decimal where every decimal digit is a separate bin value (this is
-used for some old hardware in the 1970s and 1980s).
+In our init we calculate the divisor and configure channel 0 to use mode 3,
+binary counting, and the low-byte/high-byte access mode. We 
+then send the low byte of the divisor followed by the high byte. 
+BCD means binary-coded decimal, where each decimal digit is represented 
+using binary. We are using binary counting rather than BCD counting.
 
-We then write the divisor 8 bytes at a type to the channel 0\'s data. 
-That\'s our initialization set up. The timer handler\'s code is just a
-debug which will output when 1 second has passed so we can ensure that
-100hz has been set correctly.
-Later on we may need to consider setting the ticks to a 64bit value. it
-originally was, but if it was, we wouldn't be able to perform a modulus
-operator on it when testing, so you may want to change it to 64 bits
-after ensuring that it works. Then make some special code for
-performing on 64bit values
+We then write the 16-bit divisor to channel 0 as two 8-bit values. We send the
+low byte first and then the high byte.
+That's our initialization set up. The timer handler's code is just for debugging.
+Because we configured the PIT to generate 100 interrupts per second, every
+100 ticks should be approximately one second. This lets us check that our 100Hz
+timer is working correctly.
+Later on we may need to consider setting ticks to a 64-bit value.
+A 32-bit OS can still use 64-bit integers, although
+operations on them may require more instructions. For now, a 32-bit
+value is enough for our initial testing and further development with the 
+operating system. We can change it to 64 bits later so that the tick counter can 
+run for much longer before it wraps around.
 
 We can then call this from our IRQ manager:
 
@@ -170,10 +176,22 @@ void irq_handler(registers_t* regs) {
 }
 ```
 
+Remember that our hardware IRQs start at interrupt vector 32 because
+we remapped the PIC earlier. Therefore, IRQ0 arrives as interrupt number 32. 
+Subtracting 32 gives us the original IRQ number, which is 0 for the timer.
+
+For now, we only handle IRQ0. We will add the other hardware devises to this
+switch statement as we write their drivers
+
 Call `timer_init(100)` from main after calling `idt_init()` to
 initialize the timer and then test. You should see 1 second show up
-every second.
+every second. If you get any errors with putting `timer_init(100)` after
+`idt_init()` this could be because the PIT expects to be configured *before
+interrupts are enabled*. Otherwise, the CPU can start receiving timer
+interrupts before you've configured the PIT with desired frequency.
+To fix this, you may want to move `asm volatile("sti");` in main rather than 
+`idt_init()`.
 
-The timer is finished. That was simple. Now let\'s move onto writing the
+The timer is finished. That was simple. Now let's move onto writing the
 keyboard driver.
 
