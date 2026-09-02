@@ -88,8 +88,8 @@ This is all we need to know to make user space for now, it includes
 refactoring of a lot of our previous code, and really we could have been
 implementing the user space parts from the start, but it would have
 taken until this stage to actually get user space processes
-working, as we would still need to implement system calls after this. We
-will start by editing our GDT and making Ring 3.
+working. We would still need to implement system calls after this. We
+will start refactoring by editing our GDT and making Ring 3.
 
 ## GDT change
 
@@ -314,7 +314,7 @@ clear its memory and this is used for the page directory. Now the next
 step may confuse you a little, but this is an important step. What we do
 is we copy the kernel's identity mapping to the page directory of the
 user process. This is important because user processes will still need
-to access kernel resources, an example of this is being syscalls (the
+to access kernel resources, an example of this is being system calls (the
 next chapter) where we will need to execute kernel code via an interrupt
 that ring 3 can access. We then allocate a frame for the user space
 stack (that is 4Kib long), map it, and then set its address in the
@@ -810,7 +810,7 @@ void isr_handler(registers_t* regs) {
 And that should be our user space code done. We can cause exceptions and
 our OS should still run, and we should be able to write to the VGA. The
 next step is to make the user space actually usable, by implementing
-syscalls, which allow us to use kernel resources from our user space.
+system calls, which allow us to use kernel resources from our user space.
 
 --- DEV STUFF ---- remember changes in process creation. --
 context switcher changes too. -- and then interrupt with retrieving ss.

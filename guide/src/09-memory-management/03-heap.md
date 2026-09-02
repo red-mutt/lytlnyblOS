@@ -2,31 +2,31 @@
 
 ## What are we doing?
 
-To put it short, the point of this section is to regain back the
+To put it short, the point of this section is to regain the
 features provided by `malloc` and free in C that we lost not having an
 operating system that provides these features (until now). If you
 weren't aware we need access to `malloc` because currently our memory is
 static, every size is known at compile time, but for a more functional
-OS we need to make things where size or lifetime is unknown. A good
+OS we need to make things where the size or lifetime is unknown. A good
 example of where we need this is in file systems, where the sizes of
 files and directories are unknown. Another thing to know is that the
-versions of `malloc` and free we are writing are for use only inside
+versions of `malloc` and `free` we are writing are for use only inside
 the kernel, if we choose to run code outside the kernel in user space,
 we will need different versions.
 
 For this allocator, we are not actually writing a driver for any sort of
 hardware, this is software. You may be thinking of the Memory
-management unit (MMU), but this is a device for translating and
+Management Unit (MMU), but this is a device for translating and
 protecting memory addresses. We actually interfaced with this in the
 previous chapter and writing the paging could have been considered
 writing a driver.
 
 ### How does the heap work?
 
-In computing there are two meanings of the word heap, one is a data
-structure which satisfies the "heap condition" and is not related to
-the one we are creating which is heap memory which is simply a region of
-memory used for dynamic memory allocation
+In computing there are two meanings of the word heap. One is a data structure
+which satisfies the "heap condition" and is not related to the one we are creating,
+which is heap memory. Heap memory is simply a region of memory used for dynamic memory
+allocation.
 
 Somewhere in memory, we can allocate a page for our heap. Initially the
 allocator does not know anything about which blocks are free and such.
@@ -38,14 +38,13 @@ Speaking of blocks, the heap is made up of them, initially it's one big
 block when all memory is free. Every block has its own header and due
 to the next member, the collection of headers form a linked list, and
 then this is essentially the structure of our heap. And then `malloc` will
-traverse the linked list of headers looking for the next free block and
+traverse the linked list of headers looking for a free block and
 whether it's big enough and then will return the pointer if successful.
 Free will just take the address and then set the memory to free. But
 there is a problem with fragmentation here, where after enough use we
-may have 300 bytes free, but no segment that is a size of 250 bytes due
+may have 300 bytes free, but no single segment that has a size 250 bytes due
 to having many smaller segments that are all separate. This is fixed
-using coalescing, where we merge adjacent free blocks. This all seems
-simple enough.
+using coalescing, where we merge adjacent free blocks. 
 
 We must also remember that we are not creating the heap on raw memory,
 we are building it on top of paging, this is the first thing in our
@@ -64,9 +63,9 @@ This is our blueprint for the heap:
 
 #define HEAP_START 0x00400000 //dir index 1, eveyrthing else 0
 
-#include 
-#include 
-#include 
+#include <stddef.h>
+#include <stdbool.h>
+#include <stdint.h>
 
 typedef struct heap_header{
     size_t size;
@@ -100,13 +99,12 @@ heap_header_t* get_header(void* ptr);
 #endif
 ```
 
-The first thing we define is a virtual address for the start of the
-heap, this is at page table 1, page 0, address 0. We then make a type
+The first thing we define is a virtual address for the start of the heap.
+This is at page directory index 1, page table index 0, address 0. We then make a type
 for the heap header that has everything we discussed prior. We then
 define `init_heap`, and then `malloc` and free. Furthermore, we then have a function that
-will expand the pages used by the heap if it's too full. And then we
-have our helpers for finding free blocks, splitting blocks, merging
-blocks and getting a header from a virtual address.
+will expand the pages used by the heap if it's too full. And then we have our helpers for finding
+free blocks, splitting blocks, merging blocks and getting a header from an allocated address.
 
 ### Implementation
 
@@ -235,32 +233,31 @@ the heap, this is used for extending the heap.
 
 To start, we allocate a frame using the PMM, Then we map this to the
 virtual address `HEAP_START` with present and writeable flags, then we
-map a pointer to a `heap_header` to the virtual address we just
-allocated.
+cast the virtual address to a pointer to a `heap_header`.
 This is our typical workflow for using our implementation of paging from
 now on. After we allocate memory we fill our first header with the
 applicable data then we set this to the global variable and then set
-heap start to the end of this page.
+`heap_end` to the end of this page.
 
 ### `find_free_block`
 
 This function takes in a `requested_size` in bytes. And then it traverses
-the linked list. If it's free and the size is larger than the requested
+the linked list. If it's free and the size is larger than or equal to the requested
 size, then we return it, if nothing is found we return null.
 
 ### `split_block`
 
 When we have a block that's big enough, we don't want to use a 30
-byte block to allocate 5 bytes of data. We must split it. The way we
+byte block to allocate 5 bytes of data so we must split it. The way we
 split it is by making a smaller block with the required size, and then a
 second which is just the extra space.
 
 First in our function we store the space remaining after we allocate the
 block of the size we want. If the remaining space isn't big enough to
 contain a header and at least a byte then we don't split it and just
-return. First we get the start for the big block that was the origin,
-next we get the start of the block we create for the free space that's
-not required. We then make a new block at the location of the pointer.
+return. We get the end of the original block, next we get the start of the 
+block we create for the free space that's not required.
+After this make a new block at the location of the pointer.
 Then we set the size of the new block to be the empty space after the
 required and set it to free, then we change the "next" variables of
 both of the headers. Finally, we set the size of the original block
@@ -269,13 +266,17 @@ the required space.
 
 ### `expand_heap`
 
-First we calculate required pages and then iterate a loop for each page
-to make where we allocate a frame, map it to a page. Next we then
+First we calculate required pages and then iterate a loop for each page,
+where we allocate a frame and map it to a page. Next we then
 traverse the head until we get to the final head in the linked list. If
-the block is free we just increase it's size to extend to the next page.
-If the final block is not free, we have to make a head at the start of
+the block is free we just increase its size to extend to the next page.
+If the final block is not free, we have to make a header at the start of
 the page with the appropriate data. After traversal, we then move the
 `heap_end` to the new end of the heap.
+
+> **_NOTE:_** For simplicity, our heap grows in page-sized increments because it's built
+on top of paging. A full allocator implementation can have more complicated strategies for growing and managing
+its address space, but this implementation is enough for our current needs.
 
 ### `kmalloc`
 
@@ -283,9 +284,8 @@ Now it's time to put together everything we've made before to
 allocate memory. First we find a free block to use, if a block isn't
 found, we expand the heap by the requested size that was passed to
 `kmalloc`, and then we recursively call `kmalloc` again. If there is a
-block, we use the split function with the requested size, set the block
-to not be free, and then return the pointer for the DATA and not the
-whole block.
+block, we use the split function with the requested size, mark the block as used, 
+and then return the pointer for the data and not the whole block.
 
 ### `merge_blocks`
 
@@ -293,11 +293,17 @@ When freeing memory we need to use coalescing, this is why we make the
 function to merge blocks. This function takes a block and if the next
 block is null or if the next block isn't free, it instantly returns.
 If the function can execute we increase the size of the first block to
-span over the next block we are merging to it, We then change the
+span over the next block we are merging to it. We then change the
 original block's next to skip over the next block. We don't need to
 set the data to 0 as it is marked as free anyway. After merging, we
 recursively call `merge_blocks` which will stop recursion if we find a
 used block, or we are at the end.
+
+One limitation of our implementation is that we only check for free blocks after the block
+being merged. This means that if the block before it's also free, we don't
+merge with it immediately. It can still be merged later when that previous block
+is freed, so this doesn't prevent the allocator from working, but it means
+our coalescing isn't as complete as it could be.
 
 ### `kfree`
 
@@ -319,7 +325,7 @@ seen here:
 #include "../memory/vmm.h"
 #include "../memory/heap.h"
 
-#include 
+#include <stdint.h>
 
 vga_text terminal;
 
@@ -360,6 +366,5 @@ void kernel_main(void)
 }
 ```
 
-Just like in regular C code, Nice! Now memory management is fully made
-which is a pretty big milestone.
-
+Just like in regular C code, we can now allocate and free memory. Now memory
+management is fully made which is a pretty big milestone.

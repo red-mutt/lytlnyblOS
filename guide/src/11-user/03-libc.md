@@ -12,6 +12,7 @@ For the latter, this would require us to have 17 syscalls (According to
 POSIX standards) that we would then use to weld together the libc and
 the existing kernel. These syscalls being:
 
+```
 1.  _exit
 2.  close_
 3.  envion_
@@ -31,6 +32,7 @@ the existing kernel. These syscalls being:
 17. unlink_
 18. wait_
 19. write_
+```
 
 However, folling the trend of us making all of our own stuff up until
 now (for example, the bootloader) and the fact that we currently do not

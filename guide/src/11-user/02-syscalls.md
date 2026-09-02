@@ -1,8 +1,8 @@
 # System Calls
 
-Now it's time to make a user space somewhat useful. Our set of syscalls
+Now it's time to make a user space somewhat useful. Our set of system calls (often called syscalls)
 will not meet the POSIX standards, and will be an incredibly simple
-implementation. The good part of this is that it's fairly simple to
+implementation. The good part of this is that it's simple to
 extend the set of syscalls that we have, we can just simply add more and
 more as our operating system requires more and more things.
 Our set of syscalls will be:

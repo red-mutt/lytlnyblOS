@@ -24,11 +24,11 @@ implement processes one process may use one frame and the other may use
 the next, but process A can still overwrite data in Process B, a modern
 operating system would not allow something like this.
 
-Another issue is that programs will assume fixed addresses, this means
-that if we define `int x;` the compiler defines its location as a 
-hard code place in memory. However, with paging the variable's location is
-relative to the location of the program as we have our virtual memory
-addresses.
+Another issue is that programs will use addresses in their own virtual address space.
+For example, if we define `int x;`, the compiler assigns it a virtual address within the program.
+With paging, that virtual address can be mapped to a different physical frame,
+allowing different processes to use the same virtual addresses without interfering with 
+each other.
 
 The reason we make this is really only for infrastructure for future
 feature like processes, user mode and the heap. But right now with our
@@ -44,7 +44,7 @@ unit translates to physical ram and then accesses without the program
 ever knowing this happened. With our paging, we need a structure to
 translate every possible virtual address into a physical address, we
 can't do this directly as that would result in 4Bil entries, so this is
-why we use a page and page table. We already have frames, so now our job
+why we use a page directory and page table. We already have frames, so now our job
 is to just translate a virtual page to a physical frame.
 
 In 32-bit mode, each address is not treated as a single number any more
@@ -104,10 +104,10 @@ instead of the page tables.
 ### Enabling after creation
 
 After the creation and fulfilment of our page directories and tables, we
-then need to tell the CPU that we want to enable paging. The first step to take 
-this is to fill the content with Control register 3 (CR3) This
+then need to tell the CPU that we want to enable paging. The first step
+is to load Control Register 3 (CR3). This
 contains where the current page directory is. We must put the active
-directory within there. When processes are switched, The directory for
+directory within there. When processes are switched, the directory for
 the process will also be switched. (However for the current stage of our
 OS we will end with there only being one-page directory).
 
@@ -192,7 +192,7 @@ void init_vmm() {
 We have two global variables, the first is just the kernel directory,
 this is because we need to save the kernel directory and have a special
 one for it as it's the most critical program in an operating system.
-The current directory for now is will just always have our kernel
+The current directory for now will always have our kernel
 directory loaded into it, but when we make processes and such we will
 need to switch directories to access different process as every process
 would typically have its own page directory.
@@ -213,8 +213,8 @@ be able to actually accesses memory, as if we didn't do this, and we
 tried to make a variable or do anything with memory, we would get a page
 fault as each address would result in a page not being present.
 
-We then make the first entry in the kernel directory that points to the
-page table with the appropriate flags. the kernel directory is then
+We then make the first entry in the kernel directory point to the
+page table with the appropriate flags. The kernel directory is then
 stored in the current directory, and then we set CR3 and CR0 to turn on
 paging.
 
@@ -479,10 +479,10 @@ set the present flag to 0. It's that simple.
 
 This is mainly a function for if we ever want to debug in future, as we
 may quickly need to convert a virtual address into a physical one. The
-function works as previous but simply just returns the entry in the page
-table (which would be the physical address)
+function works as previous but simply just returns the page-table entry containing
+the physical frame address and its flags.
 
-### page_fault_handler
+### `page_fault_handler`
 
 Page faults are caused by CPU exceptions, so we would want to call this
 function from our ISR handler, as so:
@@ -511,7 +511,7 @@ we would definitely want to print.
 
 Everything else comes from the bits of the error code given by our
 `registers_t` type. Just print everything that we defined earlier
-in our header, after this we also print out the latest instruction via
+in our header, after this we also print out the address of the instruction via
 `EIP` and halt.
 
 ### Assembly updated
@@ -545,7 +545,7 @@ get_cr2:
 
 ; flush entire tlb
 ; reload CR3 with itself
-; cpu discards all cached virtual physcal translations
+; cpu discards all cached virtual physical translations
 
 flush_tlb: 
     mov eax, cr3
