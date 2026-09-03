@@ -22,10 +22,10 @@ void* alloc_frame() {
         uint32_t is_reserved = (bitmap[frame_i / 32] & (1 << (frame_i % 32)));
         if (!is_reserved) {
             bitmap_set_frame(frame_i);
-            break;
+            return (void *)(frame_i * FRAME_SIZE);
         }
     } 
-    return (void *)(frame_i * FRAME_SIZE);
+    return NULL;
 }
 
 void free_frame(void* frame_address) {
@@ -79,7 +79,7 @@ void init_pmm() {
 
     //mark usable regions as free using the bitmap
     for(uint32_t i = 0; i < map_entry_count; i++) {
-        if (memory_map[i].type == 1) { // free memory 
+        if (memory_map[i].type == 1) { // Usable RAM
             uint64_t starting_frame_index = (memory_map[i].base / FRAME_SIZE);
             uint64_t frame_length = memory_map[i].length / FRAME_SIZE;
             for (uint32_t j = starting_frame_index; j < starting_frame_index + frame_length; j++) {
@@ -115,7 +115,7 @@ void init_pmm() {
     uint32_t video_frame_index = 0xA0000 / FRAME_SIZE;
     uint32_t video_frame_end = 0xFFFFF / FRAME_SIZE;
     for (; video_frame_index < video_frame_end; video_frame_index++) {
-        bitmap_set_frame(kernel_frame_index);
+        bitmap_set_frame(video_frame_index);
     }
 
 

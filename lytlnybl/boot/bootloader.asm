@@ -11,7 +11,7 @@ start:
     call store_memory_map
 
     call load_kernel_from_disk
-    jmp 0900h:0000 ; gives control to the kernel by jumping to it's starting point.
+    jmp 0900h:0000 ; jumps to physical address 0x9000, where the kernel was loaded 
 
 store_memory_map:
     xor ax, ax

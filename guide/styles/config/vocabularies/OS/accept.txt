@@ -26,3 +26,4 @@ QEMU
 syscall
 syscalls
 Tanenbaum
+variadic

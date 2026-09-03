@@ -475,11 +475,3 @@ That's basically everything for our syscalls. The next stage will focus
 on making our user space even more useful by implementing our own
 version of the C standard library.
 
---DEV NOTES-- current: -exit -getpid -yield -sleep -write -read -sbrk
-may need spawn and wait when we get to shell spawn and wait when i make
-shell leads to this libc: --memory: malloc free calloc realloc memcpy
-memmove memset memcmp --string strlen strcmp strncmp strcpy strcat
-strchr strrchr strstr atoi --output putchar puts printf (fputs??)
---character stuffs isalpha isdigit isalnum isspace islower isupper
-tolower toupper
-

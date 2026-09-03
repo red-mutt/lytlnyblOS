@@ -1,6 +1,5 @@
 #include "user/libc/memory.h"
 
-uint8_t* memory;
 heap_header_t* heap_start_head;
 uintptr_t heap_end;
 
@@ -13,6 +12,13 @@ void init_heap() {
 }
 
 void split_block(heap_header_t* block, size_t requested_size) {
+
+  size_t space_remaining = block->size - requested_size;
+
+  if (space_remaining < sizeof(heap_header_t) + sizeof(uint8_t)) {
+    return;
+  }
+  
   heap_header_t* new = (void*)((void*)block + requested_size + sizeof(heap_header_t));
   new->size = (block->size)-requested_size-sizeof(heap_header_t);
   new->free = true;
@@ -58,6 +64,8 @@ void expand_heap(size_t requested_size) {
 }
 
 void *malloc(size_t bytes) {
+  if (bytes == 0)
+    return NULL;
   void *result;
   heap_header_t *curr;
 
