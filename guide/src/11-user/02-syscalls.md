@@ -1,6 +1,8 @@
 # System Calls
 
-Now it's time to make a user space somewhat useful. Our set of system calls (often called syscalls)
+Now it's time to make a user space somewhat useful. A system 
+call is a way for a user process to request certain functionality
+from the kernel. Our set of system calls (often called syscalls)
 will not meet the POSIX standards, and will be an incredibly simple
 implementation. The good part of this is that it's simple to
 extend the set of syscalls that we have, we can just simply add more and

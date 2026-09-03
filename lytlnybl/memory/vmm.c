@@ -60,7 +60,10 @@ void unmap_page(page_directory_t* directory, uintptr_t virtual_address) {
     uint32_t dir_entry = (*directory)[dir_index];
     page_table_t* selected_table = (page_table_t*)(dir_entry & 0xFFFFF000);
     (*selected_table)[table_index] &= ~(PAGE_PRESENT);
-    flush_tlb_page(virtual_address);
+    if (directory == current_directory) {
+        flush_tlb_page(virtual_address);
+    }
+
 }
 
 uintptr_t get_physical_address(page_directory_t* directory, uintptr_t virtual_address) {
@@ -69,7 +72,7 @@ uintptr_t get_physical_address(page_directory_t* directory, uintptr_t virtual_ad
 
     uint32_t dir_entry = (*directory)[dir_index];
     page_table_t* selected_table = (page_table_t*)(dir_entry & 0xFFFFF000);
-    return (*selected_table)[table_index];
+    return (*selected_table)[table_index] & 0xFFFFF000;
 }
 
 

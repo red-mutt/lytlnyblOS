@@ -313,7 +313,7 @@ tables.
 
 ### Implementation file
 
-```
+```c
 #include "vmm.h"
 #include "../kernel/vga_text.h"
 #include "pmm.h"
@@ -382,7 +382,7 @@ uintptr_t get_physical_address(uintptr_t virtual_address) {
 
     uint32_t dir_entry = (*current_directory)[dir_index];
     page_table_t* selected_table = (page_table_t*)(dir_entry & 0xFFFFF000);
-    return (*selected_table)[table_index];
+    return (*selected_table)[table_index] & 0xFFFFF000;
 }
 
 void page_fault_handler(registers_t* registers) {

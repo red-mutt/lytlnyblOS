@@ -13,13 +13,15 @@ two parts:
 -   System calls: We allow user space processes to request services from
     the kernel
 
-On x86 32 bit architecture, the CPU has 4 levels of privilege, but for
-our OS we are only really using 2, these being Ring 0 privilege (for
-kernel stuff) and Ring 3 (for user mode stuff).
+On x86 32-bit architecture, the CPU defines four privilege levels, called rings 0
+though 3. For our OS, we are only going to use two of them: Rind 0 for the kernel
+and Ring 3 for user-mode programs.
 
-We know what ring we are in via the CPL (Current privilege level). This
-is set from the currently loaded code segment, the CPL is the bottom 2
-bits of the CS selector.
+We can determine the current privilege level from the CPL (Current Privilege Level). In
+protected mode, the CPL corresponds to the RPL (Requested Privilege Level) of the currently 
+loaded `CS` selector, so for the usual Ring 0 and Ring 3 cases it's represented by the bottom two 
+bits of `CS`.
+
 Now we currently have:
 
 ```
@@ -40,27 +42,32 @@ GDT
 └── gdt_user_data
 ```
 
-With the user data and code segments having their appropriate flags. The
-privilege level is stored inside the GDT descriptor if you remember
-correctly when we made our GDT. Wow we set our ring level is by
-changing which GDT descriptor is loaded into CS
+The user code and data segments will have the appropriate privilege 
+settings. Each GDT descriptor has Descriptor Privilege Level (DPL), which
+specifies the privilege level associated with the descriptor. When we load a code-segment
+selector into `CS`, the processor performs the appropriate privilege checks and the resulting
+code segment determines our CPL. In our case, loading the Ring 3 code-segment
+selector makes us execute at Ring 3.
 
 ### Rings are NOT enough
 
 If we set the ring level, our memory is still not protected,
 this is because we also need to set privileges within the page tables.
-As in our OS we have flags for present, writable and user. Anything to
-be directly accessed by the user space must be set with the USER flag,
-otherwise the user space process will not be able to access it and a
-page fault will happen. We will also need to edit our VMM a bit, as when
+Our page tables also have their own protection flags, including present, 
+writeable, and user. A page that user-mode code needs to access must be
+marked as a user page. Otherwise, a user-mode access to that page
+will cause a page fault. The user permission applies to every
+paging-structure entry involved in the translation, so both the relevant
+page-directory entry and page-table entry must permit user access.
+We will also need to edit our VMM a bit, as when
 we create our processes we will need to edit page directories other than
 the one that we are currently in.
 
-Each user process will have its own page directory, this is because
-for each process we will probably have the same start address for each
-program, for example `0x00400000` we want a constant address to mark the
-start but will actually reference different locations in physical
-memory.
+Each user process will have its own page directory. This allows different processes
+to use the same virtual addresses while mapping those addresses to
+different physical memory. For example, we can load every program at 
+virtual address `0x00400000`, while each process's page directory maps that virtual address
+to a different physical frame.
 
 As well as changing the GDT and paging, we need to do a couple of other
 changes to make our architecture:
@@ -68,21 +75,21 @@ changes to make our architecture:
 -   Changing processes so that each user one gets its own page
     directory
 -   Giving each process its own user stack in its user address space
--   Needs a safe to execute kernel stack to temporarily enter
-    the kernel when it needs to
+-   Giving each user process a kernel stack that the CPU can switch to
+when an interrupt or exception changes privilege levels.
 -   Copying compiled code to an address marked as ring 3
 
-We also need to know about TSS (Task State Segment). This is a
-CPU-defined structure that tells the CPU which kernel stack we should
-use if we go from ring 0 to ring 3.
+We also need to know about the TSS (Task State Segment). For our purposes,
+the important part of the TSS tells the CPU which kernel stack to use when an 
+interrupt or exception transfers execution from Ring 3 to Ring 0.
 
 ### Ring 3 Execution
 
-We can't just call user functions, the perfect place to change things
-like CS to enter a user process is the scheduler that we have
-made before, so we will also have to edit this as well. There is also the
-fact that the code we jump into for the task has to belong to a page
-that is assigned as a user.
+We cannot simply make a normal function call from Ring 0 to execute user code.
+We need to perform a privilege-level transition so that `CS` refers to the Ring 3
+code segment and the process begins executing with the user process's address space 
+and stack. Our existing context-switching machinery is a convenient place to 
+set up the state for this transition.
 
 This is all we need to know to make user space for now, it includes
 refactoring of a lot of our previous code, and really we could have been
@@ -125,7 +132,7 @@ gdt_user_code:
     db 0xCF
     db 0x00
 gdt_user_data:
-    dw 0xFFF
+    dw 0xFFFF
     dw 0x0000
     db 0x00
     db 0xF2
@@ -140,6 +147,12 @@ gdt_tss: ; will be populated in C later
     db 0
 gdt_end:
 ```
+
+Notice that the user code descriptor uses an access byte of `0xFA`, while the
+kernel code descriptor uses `0x9A`. The important difference here is the DPL: the
+kernel descriptor has DPL 0, while the user descriptor has DPL 3. THe same 
+applies to the data descriptors: `0x92` is a Ring 0 data segment and `0xF2` is a
+Ring 3 data segment.
 
 ## Process creation
 
@@ -193,9 +206,10 @@ typedef struct process {
 } __attribute__((packed)) process_t; 
 ```
 
-This is basically a refactor of the kernel process, there are multiple
-ways we could have done this, but this will just be the simplest to
-allow all of our process list to have the same type.
+This is essentially a refactor of our previous kernel-process structure. 
+There are several ways we could represent kernel and user processes, but using
+one `process_t` type keeps the process list and scheduler simple: both kinds
+of process get managed through the same interface.
 This change will include a lot of refactoring of our code, as I said
 before we should have probably considered the eventual development of
 our user space earlier on, but here we are! (and it's pretty important
@@ -213,6 +227,11 @@ process_t* create_process(void* task_address, process_type_t type);
 void create_kprocess(process_t* new_process);
 void create_uprocess(process_t* new_process);
 ```
+
+`USER_STACK_TOP` is the initial value of `ESP`, not the address
+of the first byte in the mapped stack page. Since the stack grows downward, the
+first mapped page is immediately below this address. This gives us one page of stack
+while leaving `ESP` pointing just above it.
 
 As you can probably guess the `create_process` function will handle all
 generic process stuff, and then our respective user space and kernel
@@ -311,14 +330,19 @@ The number 3 turns on the bottom two bits of the segment selectors which
 sets the CPL.
 Now it's time to handle the process's memory: We allocate a frame and
 clear its memory and this is used for the page directory. Now the next
-step may confuse you a little, but this is an important step. What we do
-is we copy the kernel's identity mapping to the page directory of the
-user process. This is important because user processes will still need
-to access kernel resources, an example of this is being system calls (the
-next chapter) where we will need to execute kernel code via an interrupt
-that ring 3 can access. We then allocate a frame for the user space
-stack (that is 4Kib long), map it, and then set its address in the
-process
+step may confuse you a little, but this is an important step. What we do is
+copy the kernel's mappings into the page directory of the user process.
+This allows the kernel to remain mapped when that process is running,
+which is important when we enter the kernel to handle and interrupt or 
+system call.
+
+These mappings should normally remain kernel-only. A Ring 3 process
+must not be able to directly access kernel just because the kernel's mappings exist in its
+page directory. The CPU uses the user/kernel permissions in the paging structures
+to prevent user-mode accesses to supervisor pages.
+
+We then allocate a frame for the user space stack (that is 4Kib long), 
+map it, and then set its address in the process.
 
 ### What about destruction
 
@@ -331,7 +355,11 @@ process
     }
 ```
 
-Simple enough, just a little more memory to unmap and they are good.
+> **_NOTE_**: This removes the user mappings from the process's page directory. However, 
+unmapping a page does not by itself free the physical frame that backed it.
+A complete process-destruction routine must also return the user stack, user code,
+page tables, and page directory frames to the physical-frame allocator when they are no longer
+needed.
 
 ## Changes in the context switcher
 
@@ -412,13 +440,22 @@ void context_switch(process_t* old_process, process_t* new_process, registers_t*
 }
 ```
 
-For user and kernel processes, the only thing that changes is in regard 
-to saving and loading the stack. The stack segment doesn't really
-matter for kernel processes, so we don't really have to do anything
-with that AFAIK.
+For user and kernel processes, the main difference here is how we save and
+restore the stack. For a kernel process, we can save and restore `ESP`
+directly because the interrupt frame is already on the kernel stack.
+With user processes, the interrupt frame contains the user `ESP` and `SS`, 
+so we need to save those values separately.
 
-For the context switching function we add in some new logic that
-terminates the old process if it is marked as TERMINATED. This is going
+The stack segment still matters architecturally for kernel processes,
+but because all the kernel processes use the same Ring 0 data/stack segment,
+we do not need to treat it as per-process state in the same way we do for
+user processes.
+
+
+In the context-switching function we add logic to destroy the old process if it
+has already been marked `PROCESS_TERMINATED`. This lets a process be marked for 
+destruction while its context is still active, then allows the scheduler to switch away
+from it before its resources are released. This is going
 to be important later in this section when an exception happens in a
 user process. Another thing we do for user and kernel processes is
 setting cr3 appropriately, and then we do another thing which is setting
@@ -476,10 +513,13 @@ void init_tss(void);
 extern void load_tss(void);
 ```
 
-As I said before, TSS just defines where we need to go to get to the
-kernel stack (for our purposes), so we only really care about 2
-registers defined in our structure, these being esp0 and ss0, we can
-forget about everything else. `gdt_tss[]` is just the reference to the
+The TSS contains much more information than we need for the OS. Because we 
+are not using hardware task switching, the important fields for us are `ESP0` and 
+`SS0`. When an interrupt or exception causes a transition from Ring 3 to Ring 0,
+the CPU uses these fields to select the kernel stack for the new privilege level.
+
+We can ignore most other fields in the TSS for now.
+`gdt_tss[]` is the reference to the
 GDT descriptor for the TSS that we made global. Let's look at the
 implementation code:
 
@@ -526,19 +566,19 @@ load_tss:
 
 First we define a global variable for the TSS. Next his handling the
 data to be stored in the GDT descriptor. The base is set to the address
-of the TSS and the limit is set to the size of the TSS. I have made
+of the TSS and the limit gets set to the size of the TSS minus one, because
+the descriptors limit is the highest valid byte offset within the TSS. I have made
 setting the descriptor similar to the structure we had in our assembly,
 just so you can see what the data means and compare it to the info that
 I gave about GDT entries if you so wish to see what the data
 individually means. But basically this is just a bunch of data that
 tells the CPU where the TSS is and how big it is.
 
-Next we set the ss0 of the TSS to `0x10`, this is used to change the
-segment selector when we want to load the stack from a lower privilege
-level to a higher one. esp0 does the same, but instead changes the stack
-pointer instead of the segment selector, so this will need to be changed
-each time we load a new user process, this is what we did in the context
-switcher as seen before.
+Next we set `SS0` in the TSS to `0x10`, which is our Ring 0 data segment selector.
+When an interrupt or eception transfers execution from Ring 3 to Ring 0, the CPU
+loads the selector as the new `SS` value loads `ESP0` as the new stack pointer.
+`ESP0` is updated whenever we switch to a different user process,
+because each user process has its own kernel stack.
 
 For the assembly, `ltr` is an instruction that just means "load task
 register," the offset of the TSS descriptor is given to it. This is all
@@ -575,8 +615,10 @@ typedef struct {
 } __attribute__((packed)) registers_t;
 ```
 
-With this structure, `iret` will handle the `user_esp` and ss on its own,
-so don't worry
+When returning from the kernel to a user process, `iret` can restore the user 
+`SS` and `ESP` from the interrupt frame when the return changes privilege levels.
+This is why our interrupt frame needs to preserve these values for a user-mode interrupt
+or exception.
 
 ### mapping changes
 
@@ -618,7 +660,9 @@ void unmap_page(page_directory_t* directory, uintptr_t virtual_address) {
     uint32_t dir_entry = (*directory)[dir_index];
     page_table_t* selected_table = (page_table_t*)(dir_entry & 0xFFFFF000);
     (*selected_table)[table_index] &= ~(PAGE_PRESENT);
-    flush_tlb_page(virtual_address);
+    if (directory == current_directory) {
+        flush_tlb_page(virtual_address);
+    }
 }
 
 uintptr_t get_physical_address(page_directory_t* directory, uintptr_t virtual_address) {
@@ -627,7 +671,7 @@ uintptr_t get_physical_address(page_directory_t* directory, uintptr_t virtual_ad
 
     uint32_t dir_entry = (*directory)[dir_index];
     page_table_t* selected_table = (page_table_t*)(dir_entry & 0xFFFFF000);
-    return (*selected_table)[table_index];
+    return (*selected_table)[table_index] & 0xFFFFF000;
 }
 ```
 
@@ -637,7 +681,7 @@ Let's take a small break from writing the kernel, and write our code
 that our first user space process will have.
 
 ```c
-#include 
+#include <stdint.h>
 void _start(void)
 {
     volatile uint32_t *bad_address = (uint32_t *)0xDEADBEEF;
@@ -653,10 +697,17 @@ void _start(void)
 }
 ```
 
-This code has 2 tests. The first one will give a page fault at an
-address that either should not exist or we will not have access too, the
-second is directly writing to the VGA, which will indicate that we are
-actually able to do something functional.
+This code is intended to test two things. First, the write to 0xDEADBEEF should
+cause a page fault because the address is not mapped as a user-accessible page.
+Second, the VGA write tests whether a user process can successfully access a 
+page that we explicitly mapped for it.
+
+Because the page fault terminates the process,
+execution will never reach the VGA write. To test both behaviours in one run, 
+either perform the VGA write before the invalid access, or remove invalid access and test.
+The VGA write tests whether a user process can access a page that we deliberately mapped as 
+user-accessible. The virtual address used by the program is `USER_VGA` (`0x00B00000`), while that 
+virtual address maps to the VGA text buffer at `0xB8000`.
 
 Alongside our user space code, we must have a linker to be used, this
 is because how we load our code will be by copying the data in our
@@ -691,10 +742,15 @@ SECTIONS
     }
 }
 ```
+Just like with our kernel, the linker script determines the virtual addresses that
+the program expects its sections to occupy. Here we place the program at `0x00400000`,
+which must match the virtual address at which we later map the program's physical frame.
 
-Just like a simple linker like we made for our original kernel, and then
-we must build a specific way for a Makefile. My Makefile skills are
-pretty poor, so I'll just put the commands here:
+We then compile the program separately, link it to an ELF executable, convert that 
+executable into raw binary, and finally convert the raw binary into an object file
+that the kernel linker can include.
+
+My Makefile skills are pretty poor, so I'll just put the commands here:
 
 ```makefile
  #user tests
@@ -750,9 +806,11 @@ Add this to the end of our kernel main code:
 }
 ```
 
-This is everything we described before, we copy the user space code into
-an allocated frame and then create a process and map it as a user, you
-may be wondering where the USER_CODE_BASE definition is, and I actually
+For this first test program, we allocate one physical frame and copy the entire program
+into it. This means that the resulting binary must fit within one 4 KiB page. A
+real executable loader will need to allocate and map enough pages to contain all
+the program's sections rather than assuming that one frame is good enough.
+You may be wondering where the USER_CODE_BASE definition is, and I actually
 created a separate header file for this:
 
 ```c
@@ -767,23 +825,24 @@ created a separate header file for this:
 #endif
 ```
 
-This is because when we previously made the kernel heap allocator, we
-set its address as `0x00400000`. It's important to make a file of these
-mapping so that they don't collide, if they did, it would cause
-exceptions and would not be good. This is due to the kernel
-mappings being included within all of our user space processes, so we
-can't map anything for the user space over anything that already exists
-for the kernel.
+In our current layout, `USER_CODE_BASE` is `0x00400000`, while `HEAP_START` is now
+`0xC0000000`. This keeps the user program's low vitual addresses seperate from the kernel 
+heap's high virtual-address range.
 
-After this, if we then run our kernel, and we get the DEADBEEF exception
-then everything is working, but there is one issue that we currently
-haven't implemented, this is the fact that a user exception crashes the
+There's a need to choose a non-overlapping virtual address ranges for the
+kernel heap and user-space mappings. If the two mappings in the same address space
+get assigned the same virtual address, one mapping would replace the other
+and might cause a page fault. 
+
+After this, if we then run our kernel, and we get the `0xDEADBEEF` page-fault
+then our basic user-mode memory protection is working. One issue currently
+hasn't been fixed, this is the fact that a user exception crashes the
 operating system (this is seen by us no longer being able to write
 text).
 
 ### Fixing exception
 
-To change this, let's just change our `ISR` handler a little:
+To change this, let's just change our `ISR` handler a little:<stdint.h>
 
 ```c
 void isr_handler(registers_t* regs) {
@@ -807,14 +866,15 @@ void isr_handler(registers_t* regs) {
 }
 ```
 
-And that should be our user space code done. We can cause exceptions and
-our OS should still run, and we should be able to write to the VGA. The
-next step is to make the user space actually usable, by implementing
-system calls, which allow us to use kernel resources from our user space.
+`CS` contains the selector for the code segment that was interrupt. The bottom two bits
+contain its `RPL`, which for our Ring 0/Ring 3 design tells us whether the interrupted
+code was running in kernel or in user mode. `(regs->cs & 3) == 3` means that the exception
+came from Ring 3.
 
---- DEV STUFF ---- remember changes in process creation. --
-context switcher changes too. -- and then interrupt with retrieving ss.
--- creation of TSS -- user programs compiled seperately -- need to
-change map_page to take directory (and all other functions) -- write
-about destruction functions and exception handling -
+And that gives us the basic exception handling needed for our first user process.
+If a user process causes an exception, we mark that process as terminated and 
+switch to another process instead of halting the entire kernel.
 
+This is only a basic policy. A real operating system would normally distinguish
+between recoverable faults, signals or other process-level errors, and fatal
+kernel faults rather than terminating every user process for every exception.
