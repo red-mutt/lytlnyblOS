@@ -342,6 +342,114 @@ static void ata_select_drive(uint32_t lba) {
 }
 ```
 
+The first line here is the code that actually sets the drive. 
+We set it using the `ATA_DRIVE_MASTER` code. You may be thinking why 
+`((lba >> 24) & 0x0F)`? This is because the upper four bits of the LBA are
+placed in the drive register. This is just because of how the legacy ATA register interface
+was designed, the functionality of there 4 high bits still does not change.
+
+After this, `ata_400ns_delay();` gives the device time to process the selection, and
+`ata_wait_bsy();` waits for the device to stop being busy.
+
+### `init_ata()`
+
+```c
+void init_ata() {
+  outb(ATA_DRIVE, ATA_DRIVE_MASTER);
+  ata_400ns_delay();
+}
+```
+
+This is a **minimal** initialization function. It selects the ATA master drive
+and waits briefly for the device to respond. 
+
+> **_NOTE:_** As I said, this is minimal. If you wanted to write a full
+ATA driver you would need to perform full ATA device discovery and identification.
+
+### `ata_read_sector()`
+
+```c
+bool ata_read_sector(uint32_t lba, void* buffer) {
+  uint16_t *data = (uint16_t*)buffer;
+
+  if (lba > 0x0FFFFFFF) return false;
+
+  ata_select_drive(lba);
+
+  outb(ATA_SECTOR_COUNT, 1);
+
+  outb(ATA_LBA_LOW, lba & 0xFF);
+  outb(ATA_LBA_MID, (lba >> 8) & 0xFF);
+  outb(ATA_LBA_HIGH, (lba >> 16) & 0xFF);
+
+  outb(ATA_COMMAND, ATA_CMD_READ_PIO);
+
+  if (!ata_wait_drq()) return false;
+
+  for (int i = 0; i < 256; i++) {
+    data[i] = inw(ATA_DATA);
+  }
+
+  ata_400ns_delay();
+
+  return true;
+}
+```
+
+The ATA hardware can only read in and write out in words, that's why we had to 
+make the assembly for taking in and giving out words via I/O. 
+Let's walk through the code. We first convert our buffer that we pass to 
+the function to an array of words, check that our LBA doesn't exceed limits and
+select the drive.
+
+Next, we set the amount of sectors we want to read (1), then set the LBA
+via low, mid and high ports. We then send a command to the ATA to tell 
+it that we are reading, we then use `ata_wait_drq()` to check if we are 
+ready to read. If we are, we then continue to read, wait 400ns and return.
+
+### `ata_write_sector()`
+
+```c
+bool ata_write_sector(uint32_t lba, const void* buffer) {
+  const uint16_t *data = (const uint16_t*)buffer;
+
+  if (lba > 0x0FFFFFFF) return false;
+
+  ata_select_drive (lba);
+
+  outb(ATA_SECTOR_COUNT, 1);
+
+  outb(ATA_LBA_LOW, lba & 0xFF);
+  outb(ATA_LBA_MID, (lba >> 8) & 0xFF);
+  outb(ATA_LBA_HIGH, (lba >> 16) & 0xFF);
+
+  outb(ATA_COMMAND, ATA_CMD_WRITE_PIO);
+
+  if (!ata_wait_drq()) return false;
+
+  for (int i = 0; i < 256; i++) {
+    outw(ATA_DATA, data[i]);
+  }
+
+  ata_400ns_delay();
+  outb(ATA_COMMAND, ATA_CMD_FLUSH_CACHE);
+  ata_wait_bsy();
+
+  return true;
+}
+```
+
+Writing a sector is alike to reading one. We select the drive,
+specify the sector, and send a command, but instead of reading data from the ATA
+device, we send data to it. An addition to this is that we 
+flush the cache. This flushing ensures that the data actually
+gets written to the file system and isn't just residing within ATA cache.
+Then we wait for the drive to finish being busy before we return to ensure that 
+the write happens.
 
 
-
+That's all for the ATA driver. You could actually skip the next file system chapters
+and actually make your own. We will be fully abstracting away from 
+hardware, and you have ways of writing 
+and reading sectors. Writing a file system could be a nice creative task for you,
+as writing file systems is well documented.

@@ -34,10 +34,10 @@ Sectors 1-50
 Sector 51
     filesystem superblock
 
-Sectors 52-60
+Sector 52
     free-space bitmap
 
-Sectors 61-100
+Sectors 53-100
     inode table
 
 Sectors 101+

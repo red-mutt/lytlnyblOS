@@ -10,7 +10,6 @@
 #define FS_BITMAP_BLOCK 1 //1 block
 #define FS_INODE_START 2 //block count calculated when formatting
 
-#define FS_MAX_INODES 128
 #define FS_FILENAME_LENGTH 32
 
 #define FS_TYPE_FREE 0
@@ -22,8 +21,6 @@
 #define FS_TOTAL_INODES 128
 
 #define FS_ROOT_INODE 0
-
-#define FS_UINT_ERROR UINT32_MAX
 
 #define FS_MAGIC 0xDEADBABE
 
