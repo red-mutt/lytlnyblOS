@@ -64,9 +64,12 @@
 
 - [Introduction](12-filesystem/01-introduction.md)
 - [Drivers](12-filesystem/02-drivers.md)
-- [Filesystem](12-filesystem/03-filesystem.md)
+- [Filesystem Core](12-filesystem/03-filesystem.md)
 - [Filesystem Manager](12-filesystem/04-fs-manager.md)
 
 # Part XIII: Programs
 
-- [The Shell](13-programs/01-the-shell.md)
+- [Introduction](13-programs/01-introduction.md)
+- [MKFS](13-programs/02-mkfs.md)
+- [The Shell](13-programs/03-the-shell.md)
+- [The End](13-programs/04-end.md)
