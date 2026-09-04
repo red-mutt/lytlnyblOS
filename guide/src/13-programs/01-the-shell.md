@@ -1,5 +1,7 @@
 # Part XIII: The Shell
 
+## What is a shell?
+
 -DEV NOTES-
 -write about the program loader
 -large MKFS PART

@@ -255,5 +255,45 @@ Let's look quickly at the abstracted functionality of each.
     when reading and writing.
 -   `fs_write_superblock` and `fs_read_superblock` does the same as the previous but specifically
     reads and writes the superblock structure given to it.
+-   `fs_format` sets up a new file system on the disk.
+
+Block allocation. These two will be adjacent to the code in the PMM.
+
+-   `fs_alloc_block` finds a free block on the `kernel.img` and marks it as used, then 
+    returns the number of the block.
+-   `fs_free_block` marks a previously allocated block as free.
+
+The next group handles inodes:
+-   `fs_read_inode` reads an inode from the inode table.
+-   `fs_write_inode` whites an inode to the inode table.
+-   `fs_alloc_inode` finds a free inode and sets it up.
+-   `fs_free_inode` marks an inode as free.
+
+We then have the functions for directories:
+
+- `fs_find_directory_entry` looks for a filename inside a directory and
+  returns the inode associated with it.
+- `fs_add_directory_entry` adds a filename and inode number to a directory.
+- `fs_remove_directory_entry` removes a filename from a directory.
+
+Finally, we have the higher-level file operations:
+
+- `fs_create_file` creates a new file and adds it to a directory.
+- `fs_create_directory` creates a new directory and adds it to its parent.
+- `fs_read_file` reads data from a file.
+- `fs_write_file` writes data to a file.
+- `fs_delete_file` removes a file from a directory and frees the resources
+  associated with it.
+
+
+The important thing to notice is that all the functions become more
+high-level as we go down the list. For example, `fs_read_block` deals directly with disk blocks,
+while `fs_read_file` can read part of a file without you needing to know where on `kernel.img` the file's
+data is stored.
+
+### Writing the functions
+
+I will be explaining around 600 lines of code all in one go. Brace
+yourself and try not to get too overwhelmed.
 
 
