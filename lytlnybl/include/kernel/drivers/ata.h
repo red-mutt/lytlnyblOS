@@ -20,6 +20,7 @@
 
 #define ATA_CMD_READ_PIO 0x20
 #define ATA_CMD_WRITE_PIO 0x30
+#define ATA_CMD_FLUSH_CACHE 0xE7
 
 #define ATA_DRIVE_MASTER 0xE0
 

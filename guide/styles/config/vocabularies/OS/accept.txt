@@ -7,6 +7,8 @@ callee
 Cybersecurity
 GDB
 Hussain
+inode
+inodes
 ISRs
 keymap
 keymaps

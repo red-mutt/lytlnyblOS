@@ -87,7 +87,7 @@ bool ata_write_sector(uint32_t lba, const void* buffer) {
   }
 
   ata_400ns_delay();
-  outb(ATA_COMMAND, 0xE7);
+  outb(ATA_COMMAND, ATA_CMD_FLUSH_CACHE);
   ata_wait_bsy();
 
   return true;
