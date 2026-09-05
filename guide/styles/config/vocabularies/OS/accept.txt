@@ -1,10 +1,12 @@
 BIOS
+bitwise
 bootable
 bootloader
 Bootloading
 breakpoint
 callee
 Cybersecurity
+filesystem's
 GDB
 Hussain
 inode
