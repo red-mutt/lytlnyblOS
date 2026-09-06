@@ -115,18 +115,18 @@ int32_t fs_write(int fd, void* buffer, uint32_t size) {
   if (!open_files[fd].used)
     return -1;
 
-  int32_t bytes_read = fs_write_file(open_files[fd].inode,
+  int32_t bytes_written = fs_write_file(open_files[fd].inode,
       buffer,
       size,
       open_files[fd].offset
   );
   
-  if (bytes_read < 0)
+  if (bytes_written < 0)
     return -1;
 
-  open_files[fd].offset += bytes_read;
+  open_files[fd].offset += bytes_written;
 
-  return bytes_read;
+  return bytes_written;
 }
 
 static bool split_path(const char* path, char* parent, char* name) {
