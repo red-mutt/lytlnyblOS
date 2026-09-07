@@ -107,10 +107,6 @@ static bool write_root_inode(FILE* image, const fs_superblock_t* superblock) {
   return write_block(image, block, buffer);
 }
 
-static bool clear_root_directory(FILE *image, const fs_superblock_t* superblock) {
-  uint8_t buffer[FS_BLOCK_SIZE] = {0};
-  return write_block(image, superblock->data_start, buffer);
-}
 
 static bool format_filesystem(FILE *image) {
   fs_superblock_t superblock = make_superblock();
