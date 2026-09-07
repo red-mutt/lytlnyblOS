@@ -757,6 +757,45 @@ root inode.
 This function essentially binds everything together that we have previously talked about in order
 to make the filesystem for the custom operating system. First we format, and then install the root filesystem,
 
+## Compilation
+
+Now that MKFS is set up, you must compile the user space programs into the `rootfs` so 
+that they are written to the filesystem. MKFS must also must be executed somewhere in 
+the Makefile.
+
+Here is some inspiration from my Makefile on how to include programs in the `rootfs`, all
+you really need to do is copy the `.bin` file for the user space program somewhere in the 
+`rootfs` directory so it isn't that complicated.
+
+```makefile
+USER_TEST_ELF = $(BUILD_DIR)/user_test.elf
+USER_TEST_BIN = $(BUILD_DIR)/user_test.bin
+USER_TEST_ROOTFS = $(ROOTFS_BIN_DIR)/user_test
+
+ROOTFS_DIR = rootfs
+ROOTFS_BIN_DIR = $(ROOTFS_DIR)/bin
+
+$(USER_TEST_ELF): $(BUILD_DIR)/user/programs/test.o $(USER_LIB)
+	mkdir -p $(dir $@)
+	$(LD) -m elf_i386 -T $(USER_LINKER) $^ -o $@
+
+$(USER_TEST_BIN): $(USER_TEST_ELF)
+	$(OBJCOPY) -O binary $< $@
+
+$(USER_TEST_ROOTFS): $(USER_TEST_BIN)
+	mkdir -p $(dir $@)
+	cp $< $@
+```
+
+Here's how I included MKFS in compilation too:
+
+```makefile
+$(KERNEL_IMG): $(BOOTLOADER) $(KERNEL_BIN) $(MKFS) $(USER_TEST_ROOTFS) 
+	dd if=/dev/zero of=$@ bs=512 count=20480
+	dd if=$(BOOTLOADER) of=$@ conv=notrunc
+	dd if=$(KERNEL_BIN) of=$@ seek=1 conv=notrunc
+	$(MKFS) $@
+```
 
 ## Conclusion
 

@@ -65,8 +65,6 @@ KERNEL_LINKER = kernel/linker.ld
 ROOTFS_DIR = rootfs
 ROOTFS_BIN_DIR = $(ROOTFS_DIR)/bin
 
-USER_ROOTFS_BIN = $(ROOTFS_BIN_DIR)/user_test $(ROOTFS_BIN_DIR)/shell
-
 MKFS = $(BUILD_DIR)/mkfs
 
 
