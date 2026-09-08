@@ -61,41 +61,6 @@ void kernel_main(void)
 
     vga_text_writeline(&terminal, "back in main");
     
-    //userspace testing
-
-    /*
-    void* code_frame = alloc_frame();
-
-    extern unsigned char _binary_user_test_bin_start[];
-    extern unsigned char _binary_user_test_bin_end[];
-
-    //copy user program to physical frame
-    uintptr_t user_size = (uintptr_t)(_binary_user_test_bin_end - 
-            _binary_user_test_bin_start);
-
-    for (uintptr_t i = 0; i < user_size; i++) {
-        ((uint8_t*)code_frame)[i] = _binary_user_test_bin_start[i];
-    }
-
-    process_t* user_proc = create_process((void*)USER_CODE_BASE, PROCESS_USER);
-
-    map_page(
-        user_proc->page_directory,
-        USER_CODE_BASE, 
-        (uintptr_t)code_frame, 
-        PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER
-    );
-    */
-
-    /*
-    //map vga so process ring 3 can access
-    map_page(
-        user_proc->page_directory,
-        USER_VGA,
-        0xB8000,
-        PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER
-    );
-    */
 
     uint8_t test_write[512];
     uint8_t test_read[512];

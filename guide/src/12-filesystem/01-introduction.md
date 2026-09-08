@@ -114,8 +114,8 @@ First the driver, next the filesystem, then a manager for the filesystem.
 
 
 
-
+<!--
 -DEV NOTES- 
 -remember to write about updates to the Makefile (for making a larger disk and for general organisation purposes) 
 -write about the fs_manager too 
-
+-->

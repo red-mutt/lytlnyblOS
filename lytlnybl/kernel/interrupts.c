@@ -135,7 +135,6 @@ void syscall_handler(registers_t* regs) {
             context_switch(current_process, get_next_process(), regs);
             break;
         case SYSCALL_WRITE:
-            // a rather mock version of write syscall, only used for output to the terminal, will advance more later
             fd = regs->ebx;
             buffer = regs->ecx;
             count = regs->edx;
@@ -145,7 +144,7 @@ void syscall_handler(registers_t* regs) {
                 regs->eax = -1;
                 break;
             }
-            if (fd > 1) {
+            if (fd > 2) {
                 regs->eax = fs_write(fd, (void*)buffer, count);
                 break;
             }
@@ -156,8 +155,6 @@ void syscall_handler(registers_t* regs) {
             regs->eax = (int)count;
             break;
         case SYSCALL_READ:
-            // just like the previous, this is a mock, will do more when we get onto file system
-
             fd = regs->ebx;
             buffer = regs->ecx;
             count = regs->edx;
@@ -166,7 +163,7 @@ void syscall_handler(registers_t* regs) {
               regs->eax = -1;
               return;
             }
-            if (fd > 1) {
+            if (fd > 2) {
                 regs->eax = fs_read(fd, (void*)buffer, count);
                 break;
             }

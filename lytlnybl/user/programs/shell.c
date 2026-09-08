@@ -46,19 +46,19 @@ bool execute_command(char** words, size_t word_count) {
   if (strcmp(words[0], "ls") == 0) {
     fs_ops(FS_LS, words[1]);
   }
-  if (strcmp(words[0], "mkdir") == 0) {
+  else if (strcmp(words[0], "mkdir") == 0) {
     fs_ops(FS_MKDIR, words[1]);
   }
-  if (strcmp(words[0], "touch") == 0) {
+  else if (strcmp(words[0], "touch") == 0) {
     fs_ops(FS_TOUCH, words[1]);
   }
-  if (strcmp(words[0], "rm") == 0) {
+  else if (strcmp(words[0], "rm") == 0) {
     fs_ops(FS_RM, words[1]);
   } 
-  if (strcmp(words[0], "run") == 0) {
+  else if (strcmp(words[0], "run") == 0) {
     fs_ops(FS_RUN, words[1]);
   }
-  if (strcmp(words[0], "cat") == 0) {
+  else if (strcmp(words[0], "cat") == 0) {
     fd = open(words[1]);
 
     if (fd < 0) {
@@ -75,7 +75,7 @@ bool execute_command(char** words, size_t word_count) {
 
     close(fd);
   }
-  if (strcmp(words[0], "write") == 0) {
+  else if (strcmp(words[0], "write") == 0) {
     fd = open(words[1]);
 
     if (fd < 0) {
@@ -145,6 +145,10 @@ bool execute_command(char** words, size_t word_count) {
 
     free(buffer);
     close(fd);
+  }
+  else {
+    //command not recognised
+    return false;
   }
 
   return true;
