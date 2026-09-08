@@ -265,7 +265,7 @@ units. To see what this means, assume the value of the limit field is
 `21 x 4 KiB = 84 KiB`.
 
 Because the size of the segment limit field is 20 bits, this means that
-the maximum numeric value it can represent is `2^20 - 1`, this means that is the
+the maximum numeric value it can represent is `2^20 - 1`, this means that if the
 G flag is `0`, the maximum effective segment size is 1MiB when G is 0, and 4GiB when 
 G is 1.
 
@@ -303,8 +303,8 @@ two types belong to a category of segments called application segments;
 there is another category called system segments, and many types of
 segments belong to it.
 
-Whether a specific segment is an application or system segment, is
-defined in the S flag, also known as the descriptor type flag, which is
+Whether a specific segment is an application or system segment, gets
+defined in the S flag. Also known as the descriptor type flag, which is
 bit 4 of the fifth byte of the segment descriptor. When the S
 flag is 0, the segment is considered a system segment; when it's an
 application segment, the value of S is 1. We will focus on when the S
@@ -315,7 +315,7 @@ segment is referenced by currently running code, the processor will go
 to the descriptor of this segment and by reading the S flag (which
 should be 1), it should know that the segment in question is an
 application segment, but how does it know whether it's a data or code
-segment? This info is stored in a field called the type field in the
+segment? This info is stored the type field in the
 segment descriptor.
 
 The type field is the low 4 bits of the fifth byte of the segment descriptor.

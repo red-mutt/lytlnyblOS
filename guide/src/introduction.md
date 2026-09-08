@@ -98,38 +98,11 @@ In the next chapter, I will cover how to produce the bootloader step by step.
 
 Thanks to Mohammed Q. Hussain for writing "A journey in writing an operating system kernel" 
 which I paraphrased from in some places in the initial sections.
-Thanks to the OSDev wiki; they provide useful resources on writing drivers
+Thanks to the OSDev wiki; they provide useful resources on writing drivers.
 Thanks to the internet for providing me with great resources that helped me explain and understand 
 some things along my way of writing this.
 
 
 ## Current State of the Project
 
-Hello, this project is currently in development, and I update it frequently. 
-Just for some context, I originally created this guide about 2 years ago and wrote the first 3 entries,
-after that, I left the project abandoned until June 2026. I'm now pretty dedicated to this as my main
-hobby project and intend to be continually working on it until the guide and source code for the operating
-system are up to a high standard
-
-
-### Writing Quality
-
-I haven't proofread much up to this date, my intention is to finish everything first and make a full draft,
-and then I will go back and correct all grammatical and technical mistakes. For this reason, if you are a newcomer,
-please be wary using this as a complete guide; most writing about implementing 
-features is done, but the whole guide is not complete and the
-quality of writing has not had reviewing.
-
-
-### Code Quality
-
-I am not too well-informed on writing idiomatic C, as of now, I can think of a couple of things in the code base 
-that lessen the quality of the code, like representing physical addresses as pointers to my custom-defined types when 
-they should be represented as `uintptr_t`. I also struggle to decide between `size_t` and `uint32_t` in some places 
-if I remember correctly. There are more inconsistencies and unclean practices.
-I find that if I focus too much on writing perfect code, I am a slower developer, making a crude implementation
-and then refactoring is an important practice in development, 
-and I plan to refactor at the end of the implementing the operating system.
-Just like proofreading the document, after I have finished the first draft, I will go back to 
-my code and make it as clean as possible. Fret not for the future of this book
-
+The guide is complete and is ready for use

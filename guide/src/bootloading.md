@@ -9,7 +9,7 @@ How exciting!
 
 This also shouldn't take that many lines of code, although the instructions can be complex, I will try to explain to the best of my ability in this chapter.
 
-Sadly, if you like hands-on experience, the next chapter will cover a lot of theory, but I will try to make it as concise 
+Sadly, if you like hands-on experience, the next part will cover a lot of theory, but I will try to make it as concise 
 as possible, 
 as I only try to cover key points that you can research later if you have any interest.
 
