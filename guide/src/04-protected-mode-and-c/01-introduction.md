@@ -2,10 +2,9 @@
 
 ## A reminder of what we have now
 
-First after we covered so much theory (and honestly it's been a long
-time since I've written this guide) we should take a quick look again
-at everything we have written. Part two ended us with a Makefile that
-had this content:
+After we covered so much theory we should take a quick look again
+at the code we have written. Part two left us with a Makefile that had this
+content:
 
 ```makefile
 BOOT_FILE = bootloader/bootloader.asm 
@@ -133,7 +132,7 @@ done:
 hello_string db 'Hello World!, i am lytlnyblOS, running in real mode', 0
 ```
 
-As discussed in the previous part, where we covered all our content
+In the previous part, we covered everything we 
 needed to get our operating system into protected mode. 
 You may notice that currently we are still relying on
 BIOS interrupts. These BIOS interrupts are actually pretty powerful, and
@@ -144,43 +143,43 @@ within the BIOS) I have done so with the game snake. Linked
 ## Debugging is key moving forward
 
 With low level programming tasks such as this, it's important that
-we have a clean way to debug our programs, despite debugging still being
-important in regular programming, it's often omitted and not really
+we have a clean way to debug our programs, although debugging is 
+still important in regular programming, it's often omitted and not really
 learned to a degree that it should be by most people learning
 programming. This is why in this guide I will be intentionally making us
 have an error called a **triple fault**, and then we will be using a
 debugger to fix it.
 
-You may be asking *\"what is a triple fault?\"* A triple fault is an x86
+You may be asking *"what is a triple fault?"* A triple fault is an x86
 CPU reset that occurs when the processor encounters an exception, fails
 to invoke the exception handler (causing a double fault), and then also
 fails to invoke the double fault handler. At that point, the CPU resets
 itself. In our QEMU emulator this would look like a bunch of text
-flashing on the screen, this is because the system is continually
+flashing on the screen. This is because the system is continually
 rebooting itself over and over again.
 
 The debugger we are going to be using is GDB, so make sure to install it
 before continuing, or install whatever debugger you prefer.
 
 With the compiled state of our bootloader and kernel as of now, using
-a debugger will be pretty tricky, this is because within our debugger we
+a debugger will be pretty tricky, this is because our debugger 
 will not be able to access function names, labels, source lines and
 variable names (among many other things). We can still use the debugger
 like this, but it will function more as a CPU monitor than a source
-debugger so it\'s important to configure our build environment so we get
+debugger. It's important to configure our build environment so we get
 a lot more context when debugging.
 
 ### Setting up GDB
 
-Binary files (which is what we are compiling to now) cannot give
-functions names, labels and such so the method I am using to get access
-to them is going to be compiling to the .elf format, I will then be
-copying the .elf compilation back into .bin this is because if we use
-the .elf file we would have to refactor some of the code in our
+Binary files (which is what we are compiling to now) cannot provide
+functions names, labels and such, so the method I am using to get access
+to them is going to be compiling to the `.elf` format. I will then be
+copying the `.elf` compilation back into `.bin` because if we use
+the `.elf` file we would have to refactor some of the code in our
 bootloader.
 
-To compile to ELF must make a linker script. This tells the linker where
-to place things in memory. A linker is a program that combines object
+To compile to `.elf` we must make a linker script. This tells the linker where
+to place things in memory. Generally a linker is a program that combines object
 files into a final executable and fixes up all the addresses.
 
 My linker script, called `linker.ld` looks like this.
@@ -209,9 +208,9 @@ SECTIONS
 ```
 
 And then we must add two lines to our Makefile, one to link the object
-file into an elf, and one to copy the elf into a bin file, we must also
+file into an elf, and one to copy the elf into a bin file. We must also
 edit another line to compile our kernel into an object file in
-the elf format. The bootloader is a plain binary as we will
+the `.elf` format. The bootloader is a plain binary as we will
 not be debugging it at the current moment and will only be changing it
 to add blocks. This is our new Makefile:
 

@@ -3,7 +3,7 @@
 ## The Theory Covered
 
 There are only really four things we need to learn about before
-continuing to make our bootloader. And these are:
+continuing to make our kernel. And these are:
 
 -   x86 Operating Modes
 -   x86 Memory Segmentation (not to be confused with segmentation in disk drives)

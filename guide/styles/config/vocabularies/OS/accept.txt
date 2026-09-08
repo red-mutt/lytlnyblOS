@@ -7,11 +7,15 @@ Bootloading
 breakpoint
 callee
 Cybersecurity
+descriptor's
 filesystem's
 GDB
 Hussain
+ICWs
 inode
 inodes
+IQRs
+IRQs
 ISRs
 keymap
 keymaps
@@ -24,6 +28,7 @@ maskable
 Mohammed
 multibyte
 NASM
+NMIs
 OSDev
 print_string
 printing_finished

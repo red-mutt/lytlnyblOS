@@ -2,8 +2,8 @@
 
 ## An overview of the hardware
 
-In this part we are technically writing two drivers. One is for the 
-PS/2 controller, which provides an interface for communicating with the keyboard.
+In this part we are writing a driver for the PS/2 controller, 
+which provides an interface for communicating with the keyboard.
 Writing for this driver includes:
 
 -   Reading bytes from the controller
@@ -11,8 +11,8 @@ Writing for this driver includes:
 -   Enabling ports
 -   Sending commands to the keyboard
 
-With all of these things being low level.
-The other device we are writing a driver for is the keyboard itself
+With all these things being low level.
+We are technically writing another driver too, this being the keyboard itself
 which:
 
 -   Receives scan codes
@@ -21,7 +21,7 @@ which:
 -   Converts scan codes into key events
 -   Converts to ASCII
 
-With this being higher level after we complete the first task.
+With this being higher level compared to the PS/2 controller.
 
 There's only two ports we need for the controller. `0x60` is the data port,
 which we use to read data from and send data to the keyboard. `0x64` is the
@@ -57,14 +57,14 @@ Parity Error
 ```
 
 Two bits here are important. These are the output and input
-buffer status bits. If the output buffer bit is set, then `0x60 contains
-data that is waiting to be read. If the input buffer bit is set, then the controller
+buffer status bits. If the output buffer bit gets set, then `0x60 contains
+data that is waiting to be read. If the input buffer bit gets set, then the controller
 is still processing a command or data, so we should wait before writing to it. 
-When keyboard data is placed into the controller's output buffer,
+When keyboard data gets placed into the controller's output buffer,
 the controller can raise IRQ1 to notify the CPU that data is available.
 
 When a key is pressed, the keyboard generates a scan code, the
-controller receives it and then stores it whilst also raising IQR1, then
+controller receives it and then stores it whilst also raising IQR1. Then,
 we can receive it and decode. The keyboard does not send ASCII, it sends
 scan codes. These are numbers that symbolize interactions with the
 keyboard. For example, keyboards can use different scan code sets to represent 
@@ -86,7 +86,7 @@ the left GUI key. You can expand this later if you ever want more extended keys.
 For our simple implementation of initialization, we enable keyboard scanning by
 sending `0xF4` and initialize our keymaps that will be mapping a scan code 
 to a character. The `0xF4` command is sent through the 
-controller's data port (`0x60`), but it's a command understood by the keyboard
+controller's data port (`0x60`), but, it's a command understood by the keyboard
 itself. The controller simply forwards it to the keyboard. A complete PS/2 initialization would
 also wait for the controller's input buffer to be clear, 
 check the controller's status, flush pending data, and handle the keyboard's responses to commands.
@@ -235,7 +235,7 @@ void keyboard_handler () {
 }
 ```
 
-We then also need to call `keyboard_handler()` this in our IRQ handler
+We then also need to call `keyboard_handler()` in our IRQ handler
 on case 1.
 
 This is all we really need for our keyboard, we make an array that maps
@@ -490,16 +490,16 @@ void keyboard_handler(void) {
 
 In our handler now we first call the modifier key function and this
 returns true if a modifier key has been pressed and handles it
-accordingly, if one is a modifier key, we return because modifier keys
+accordingly. If one is a modifier key, we return because modifier keys
 are handled separately from normal character keys. I have
 added one, this being `LGUI`, I could have added more, but I haven't as
-we have no use for them. We can add move extended keys later using the same approach
+we have no use for them. We can add more extended keys later using the same approach
 
 With our Shift key we also have a separate keymap. This makes the code
 simple to understand, although it uses some extra memory. Later, we could
 use another approach to avoid storing a second full keymap. The keys
 that aren't regular printable characters are handled with simple special
-cases, such as Backspace, Enter, Tab and Escape.
+cases, such as Backspace, Enter, Tab, and Escape.
 I made some new functions for this in our VGA code. Let's take a look:
 
 ```c
@@ -528,11 +528,10 @@ The backspace function moves the terminal cursor back by one character and repla
 that character with a space. If we are at the start of a row, we move to the previous
 row and then move toward the end of that row.
 
-And then this is basically everything to do with keyboard management,
+This is basically everything to do with keyboard management,
 some things aren't implemented (like alt) but we don't
-really have much use for these keys right about now, and we can easily
-add them later, which isn't that much of a big deal anyway as we will
-probably have to refactor a lot of the code when we make a shell.
+really have much use for these keys right about now. We can easily
+add them later.
 
 We will now move on to memory management.
 

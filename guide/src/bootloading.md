@@ -7,19 +7,19 @@ Well, good news. In this chapter, we will end with a fully functioning bootloade
 a "hello world" message. 
 How exciting!
 
-This also shouldn't take that many lines of code, although the instructions can be complex, I will try to explain to the best of my ability in this chapter.
+This also shouldn't take that many lines of code, although the instructions can be complex, I will try to
+explain them all to the best of my ability in this chapter.
 
 Sadly, if you like hands-on experience, the next part will cover a lot of theory, but I will try to make it as concise 
-as possible, 
-as I only try to cover key points that you can research later if you have any interest.
+as possible.
 
 ## Printing in BIOS
 
-To show how things work through this series of articles, I will be providing a block of code and then 
+To show how things work through this book, I will be providing a block of code and then 
 explaining it further. 
 After the block, I will also be providing some comments on ambiguous lines of code.
 
-Here's some basic code I made for printing, which we will be expanding upon after an explanation, to do things like reading 
+Here's some basic code I made for printing, which we will be expanding upon later, to do things like reading 
 from storage and loading into memory:
 
 ```x86asm
@@ -52,12 +52,10 @@ dw 0xAA55 ; specifies the end of the bootloader, recognised by bios
 
 ### The `start` section:
 
-Just a warning: there are a lot of things you might have to take my word on, 
-as there will be things we need to do that I can't explain in a couple of sentences and would require a lot of explanation, 
-but I will try to answer all the things that I have tried to make you take my word for in the more theory-focused sections.
-
-Now, the first two lines of code (inside the start section) are things that I cannot provide that much context on due to
-being entangled with a wider concept in x86 programming. But I will briefly explain here.
+Just a warning: there are a lot of things you might have to take my word on. 
+There will be things we need to do that I can't explain in a couple of sentences and would require a lot of explanation.
+This will all get explained in the "Learning about x86" chapters. The first example of this being
+these two lines:
 
 ```x86asm
 mov ax, 07C0h
@@ -66,14 +64,12 @@ mov ds, ax
 
 With these two lines, the first line loads the value `0x07C0` into the `ax` register; 
 this is the segment value we use to access the bootloader at physical address `0x7C00`. 
-This is something we will further cover when we go over x86 segmentation, 
-as that's a large topic in x86.
+You will understand this fully when we cover x86 segmentation.
 
 Just after that, we set `ds` to the value in `ax`. This will set the `ds` register, which represents the data segment, 
 to the value of `ax`, ensuring that the access through `ds` refers to the bootloader's data. 
 If we didn't include this line, `ds` could refer to a different segment, causing `mov si, title_string` and
 `lodsb` to access the wrong memory.
-I will cover this in more detail in the next segment of articles. (pun not intended)
 
 This just about wraps up the hardest part to understand of our printing program, 
 and it's only hard to understand because we don't have the required knowledge 

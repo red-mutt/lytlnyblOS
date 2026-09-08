@@ -50,7 +50,7 @@ isr0:
 ```
 
 If you're wondering why we don't push registers such as `EIP`, `CS` or 
-`EFLAGS`, that is because the CPU automatically pushes them onto the stack
+`EFLAGS`, this is because the CPU automatically pushes them onto the stack
 when the interrupt occurs. Our stub only needs to save the general-purpose registers
 and the data-segment register that we want to make available to the C handler. 
 Also, another thing to consider is that passing memory from assembly
@@ -58,7 +58,7 @@ to C can be confusing, this is why I covered the stack prior. We may
 find some bugs relating to that in future. It may be good to print your
 values received in C and ensure that they are correct.
 
-We are creating ISR1-ISR31. This is tedious, which is exactly why we can use
+We are creating ISR1-ISR31. This is tedious, so we can use
 assembly macros to generate most of the repetitive code. There's one important
 distinction: some exceptions automatically push an error code onto the stack
 while others do not. Our two macros account for this difference.
@@ -294,10 +294,10 @@ And now we can run some tests:
 
 We should then test our exceptions to make sure the IDT
 and ISR stubs are working correctly. You do not need to trigger all 32,
-but testing a reasonable selection is useful. You can also look up the exceptions
+but testing a reasonable selection is useful. You can also look up the exceptions and
 deliberately trigger some of them with assembly instructions. This is a good
 way to become familiar with how the CPU transfers control to the handlers.
 Exception 3, the breakpoint exception, is particularly useful because it can also
-be triggered with the `int 3` instruction and used while debugging.
+be triggered with the `int 3` instruction and can be used while debugging.
 
 

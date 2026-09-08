@@ -2,9 +2,9 @@
 
 I'll assume you already know how the stack data structure works
 in its usual context, as it's one of the most basic data
-structures in computer science, if you don't, do not worry, as it's
+structures in computer science. If you don't, do not worry, as it's
 super simple and there are many great explanations
-[online](https://www.geeksforgeeks.org/introduction-to-stack-data-structure-and-algorithm-tutorials/)
+[online.](https://www.geeksforgeeks.org/introduction-to-stack-data-structure-and-algorithm-tutorials/)
 
 ## The implementation
 
@@ -20,7 +20,7 @@ returns.
 
 When the callee returns, the processor needs to know when it
 finishes and the location of the code that we should return to (which is
-right after the function call)
+right after the function call).
 
 Typically, each process will have its own run-time stack; this is a
 memory region that obeys the rules of the stack data structure. The 
@@ -69,14 +69,14 @@ Now, we can continue working with our function, and it's stack pointer
 now, pushing any value we may need, etc.
 
 You may be thinking, "But how do we reach our parameters if they are
-further down the stack?" Well, this is where the EBP register comes in,
-as we can use this to access our parameters by referencing an
+further down the stack?" Well, this is where the EBP register comes in.
+We can use this to access our parameters by referencing an
 incremented value of it, which is always the same in this stack-frame layout,
 as only the prior `EBP` and return address are stored between the current `EBP`
 and the parameters.
 
 It's also worth noting that the values we push in our examples are 4
-bytes, as we are using 32-bit operands in 32-bit protected mode. 
+bytes as we are using 32-bit operands in 32-bit protected mode. 
 To reach the first parameter using `EBP`, we use `[EBP + 8]`, where 
 the offset is measured in bytes. You may think we need to add 12 to reach
 the starting address of the first parameter. However, the saved `EBP` takes
@@ -84,9 +84,9 @@ up 4 bytes at `[EBP]`, and the return address takes up another 4 bytes at
 `[EBP+4]`, so the first parameter starts at `[EBP+8]`.
 
 When the callee needs to return any sort of value, we can just store it
-in a register like EAX, and then to actually return, we first restore the 
+in a register like EAX. And then to return, we first restore the 
 previous stack frame by moving `ESP` back to `EBP` and then popping the saved
-`EBP` value. Then at the top of the stack is the return address. The 
+`EBP` value. At the top of the stack is the return address. The 
 x86 instruction called `RET` can be used to return; It pops this
 address from the stack and loads it into EIP.
 
@@ -111,13 +111,11 @@ The x86 stack grows downwards: when values are pushed onto the stack,
 You can design a software stack that grows upwards, but the x86 `PUSH`
 and `POP` instructions themselves use the downward-growing stack
 convention. You may remember the expansion-direction flag I left out
-when we covered stacks. This flag does not control whether the stack grows
+when we covered segments. This flag does not control whether the stack grows
 upwards or downwards; instead, it determines whether a data segment is an expand-up 
 expand-down segment.
 
 ### Advantages and disadvantages of growing upwards and downward
-
-> [NOTE]
 
 Downwards stack growth has been widely used for several reasons.
 One possible historical reason is that early computers had limited memory,

@@ -3,7 +3,7 @@
 For this, we will need 3 files: `interrupts.asm`, `interrupts.c` and
 `interrupts.h`
 
-In our header file, the defined types in order to provide the building
+In our header file, types to provide the building
 blocks for our IDT are defined as such:
 
 ```c
@@ -21,11 +21,11 @@ typedef struct {
 } __attribute__((packed)) idtr_t;
 ```
 
-Here the `__attribute__((packed))` attribute just makes it so the data in
-memory is exactly as how we define it in the order we define it. The
-structure we define here is going to be pretty similar to our GDT,
-we just want a "descriptor," which in this case is an entry for our
-interrupt, and then we need something like the GDTR data we had before
+Here the `__attribute__((packed))` attribute makes the data in
+memory is exactly as how we define it, in the order we define it. The
+structure we define here is going to be pretty similar to our GDT.
+We just want a "descriptor," which in this case is an entry for our
+interrupt. And then we need something like the GDTR data we had before
 which describes our interrupt descriptor table, this being the `IDTR`.
 
 We then need to define our functions here:
@@ -71,9 +71,8 @@ typedef struct {
 } __attribute__((packed)) registers_t;
 ```
 
-This data structure is just so we can pass our registers when we go from
-assembly to C in our code, which will happen when an interrupt is
-called, speaking of assembly, we must also define external functions for
+This data structure is made so we can view the state of our registers
+in C when an interrupt occurs. We must also define external functions for
 our assembly labels:
 
 ```c
@@ -107,14 +106,14 @@ isr0:
     iret
 ```
 
-The first line just allows Assembly to access the external function, and the
-next two just allow C to access the Assembly labels `idt_load` is a small
+The first line just allows Assembly to access the external function. The
+next two just allow C to access the Assembly labels. `idt_load` is a small
 piece of code that gets the data sent from C by accessing the address at
-the stack pointer, and then it does the `lidt` instruction, we need to do
+the stack pointer. Then it does the `lidt` instruction. We need to do
 this because we cannot use the `lidt` instruction directly in C.
 
 The `isr0` label is what we want the CPU to go to when interrupt 0 (DIV
-by zero) is activated, it will then check our `IDT` for IDT entry 0, and
+by zero) is activated. It will then check our `IDT` for IDT entry 0, and
 find the address of `isr0` via our entry. `dword` is used to push a 32-bit 
 value onto the stack. Since this interrupt does not provide an error code, 
 we push zero as a placeholder, we then use the `iret` as this is the instruction used

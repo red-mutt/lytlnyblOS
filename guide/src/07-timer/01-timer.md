@@ -8,15 +8,14 @@ the PIC driver)
 
 In regard to the timer, we are interfacing with the Programmable
 Interval Timer (PIT). All the PIT does is generate an interrupt after a
-specified amount of time. This is good for a lot of reasons, we can use
-this to keep track of how much time has passed, we can also do sleeping
-for a specified amount of time, we will also use this if we want to
-schedule tasks, and finally we can also implement timeouts and many more
-things.
+specified amount of time. This is good for a lot of reasons: we can use
+this to keep track of how much time has passed. We can also do sleeping
+for a specified amount of time. And this will also get used if we want to
+schedule tasks.
 
-The timer is also simple to implement, as we just would really only
+The timer is also simple to implement. We just would really only
 make 3 functions. One for initialization, one for handling the ticks,
-and one for retrieving the current tick. Nice! The code I
+and one for retrieving the current tick. The code I
 present here will be similar to that short VGA section I provided
 before.
 
@@ -75,7 +74,7 @@ uint32_t timer_get_ticks(void);
 #endif
 ```
 
-Like with ICW, i have definitions for most commands and addresses for
+Like with ICW, I have definitions for most commands and addresses for
 the PIT, the mode we are using is mode 3 which is the square wave mode.
 The PIT's data ports are 8 bits wide, but our divisor is 16 bits. This
 is why we have different access modes. We use `PIT_ACCESS_LOHIBYTE`,
@@ -146,7 +145,7 @@ then send the low byte of the divisor followed by the high byte.
 BCD means binary-coded decimal, where each decimal digit is represented 
 using binary. We are using binary counting rather than BCD counting.
 
-We then write the 16-bit divisor to channel 0 as two 8-bit values. We send the
+We then write the 16-bit divisor to channel 0 as two 8-bit values. Furthermore, we send the
 low byte first and then the high byte.
 That's our initialization set up. The timer handler's code is just for debugging.
 Because we configured the PIT to generate 100 interrupts per second, every
@@ -156,8 +155,7 @@ Later on we may need to consider setting ticks to a 64-bit value.
 A 32-bit OS can still use 64-bit integers, although
 operations on them may require more instructions. For now, a 32-bit
 value is enough for our initial testing and further development with the 
-operating system. We can change it to 64 bits later so that the tick counter can 
-run for much longer before it wraps around.
+operating system. 
 
 We can then call this from our IRQ manager:
 
@@ -189,7 +187,7 @@ every second. If you get any errors with putting `timer_init(100)` after
 `idt_init()` this could be because the PIT expects to be configured *before
 interrupts are enabled*. Otherwise, the CPU can start receiving timer
 interrupts before you've configured the PIT with desired frequency.
-To fix this, you may want to move `asm volatile("sti");` in main rather than 
+To fix this, you may want to move `asm volatile("sti");` into main rather than 
 `idt_init()`.
 
 The timer is finished. That was simple. Now let's move onto writing the

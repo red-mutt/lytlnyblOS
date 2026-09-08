@@ -1,8 +1,8 @@
 ## Debugging our issue
 
 Let's add our flags back and debug with GDB, when debugging with GDB we
-will sometimes want to see the next instructions using the program counter,
-but in real mode we have to account for segment base when calculating the 
+will sometimes want to see the next instructions using the program counter.
+In real mode we have to account for segment base when calculating the 
 physical address. (I'm pretty sure this is only a quirk with real mode 
 by the way). `x/20i $pc` (which shows the next 20
 instructions) should become: `x/20i (($cs * 16) + $pc)` I have made a
@@ -21,20 +21,20 @@ instructions) should become: `x/20i (($cs * 16) + $pc)` I have made a
         x/10i (($cs * 16) + $pc)
     end
 
-Now when we make we should see "Guest has not initialized the
-display", before we connect we must run the `gdb` command to go into
-GDB then we must do `file kernel.elf` to load our labels and such, and
-then `source .gdbinit` to load our GDB init file, we should
-then do `target remote localhost:1234 ` to connect to QEMU,
-everything is set up now. Set a breakpoint at `start` and type `c` to
+Now when we run the kernel we should see "Guest has not initialized the
+display." Before we connect we must run the `gdb` command to go into
+GDB. Then do `file kernel.elf` to load our labels,
+`source .gdbinit` to load our GDB init file,
+and finally `target remote localhost:1234 ` to connect to QEMU.
+Everything is set up now. Set a breakpoint at `start` and type `c` to
 continue execution until we hit our breakpoint. We can then try the `xi`
-command I have made to see our next instructions, they should match with
+command I have made to see our next instructions. They should match 
 our code.
 
 You can set a breakpoint at our `enter_protected` label and then step
-towards our jump, and you'll see it will jump to an
-unintended point, so something is going wrong, take a look around, I'll
-give you some commands that will be useful for GDB and then after that
+towards our jump, you'll see it will jump to an
+unintended point, so something is going wrong. Take a look around, I'll
+give you some commands that will be useful for GDB, and then 
 I'll give you the solution.
 
 ## Some useful GDB commands
@@ -51,8 +51,8 @@ print/x $eax
 print/x $eip 
 ```
 
-The first shows information about all registers, while the last two
-show information about specific registers
+The first shows information about all registers. The last two
+show information about specific registers.
 
 ### Disassemble instructions/functions
 
@@ -65,7 +65,7 @@ x/20i p_mode_main
 ```
 
 The first prints instructions at current location indicated by the
-program counter, second does at an address, third does it at a label
+program counter, second does at an address, third does it at a label.
 
 ### Viewing raw memory
 
@@ -76,7 +76,7 @@ x/16wx 0x7C00
 ```
 
 Views raw memory, useful when we aren't sure if GDB is decoding our
-instructions correctly, we can check reference manuals to make sure
+instructions correctly. We can check reference manuals to make sure
 memory is represented how we want it to. First does bytes, second
 does words, third does double words.
 
@@ -89,7 +89,7 @@ info breakpoints
 delete 1
 ```
 
-This is how we make, get information about, and delete breakpoints
+This is how we make, get information about, and delete breakpoints.
 
 ### Watching execution
 
@@ -100,8 +100,10 @@ display/x $eax
 
 These output registers after each step (`si`) command.
 
-Now you are equipped to find the error, the next piece of text will
-showcase how to find the solution, I suggest you try to find it yourself
+### Find the error!
+
+You are now equipped to find the error. The next piece of text will
+showcase how to find the solution. I suggest you try to find it yourself
 a bit before you look at my solution, being proficient with debugging is
 an important skill as I've said before
 
@@ -118,8 +120,8 @@ output:
 
 `0xf 0x1 0x16` is the opcode for our `lgdt` instruction. `0x8e 0x90` is our 
 operand, which decodes to `0x908e` (with the other bytes being the next instruction).
-`0x908e` is the address of `gdtr`, but this is not how we are supposed to use `lgdt`,
-because in real mode this address is interpreted as an offset from the `DS` 
+`0x908e` is the address of `gdtr`, but this is not how we are supposed to use `lgdt`.
+In real mode this address is interpreted as an offset from the `DS` 
 segment base. Our code is loaded at physical address `0x9000`, so we need to use 
 the offset of `gdtr` relative to start instead. We much change our
 instruction to:
@@ -136,8 +138,8 @@ mov si, hello_string - start
 ```
 
 We should now be in protected mode! Another good debugging technique
-is checking other people's implementations, that's how I originally
-solved this issue. But it's also solvable via GDB. If you're thinking
+is checking other people's implementations. That's how I originally
+solved this issue, but it's also solvable via GDB. If you're thinking
 "How could I even possibly realize that" Then welcome to bare metal
 programming :)
 

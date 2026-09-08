@@ -10,17 +10,16 @@ There are 16 IRQ lines in total. For example, IRQ0 is normally connected
 to the timer and IRQ is normally connected to the keyboard. Annoyingly, due to the way the original IBM PC architecture 
 mapped hardware and IRQs, the IRQs overlap with CPU exception vectors we are 
 already using. For example, IRQ0 originally uses interrupt vector 8, which 
-conflicts with the CPU's double-fault exception. We
+conflicts with the CPU's double-fault exception. We need to
 remap the PIC so that IRQ0 starts at interrupt vector
-32 instead. We need to remap the PIC's IRQs to a different
-interrupt vectors. There's a need to remap them to 32 and so on.
+32 instead to circumvent these conflicts. 
 
 In our architecture, the 16 IRQ lines are split between two PICs: a 
 master and a slave, with each PIC handling eight IRQ lines. The two PICs
-are physically connected, with the slave's interrupt output connected to the master's IRQ2
+are physically connected. With the slave's interrupt output connected to the master's IRQ2
 input. This means the master uses IRQ2 to receive interrupts from the slave.
 
-In order to communicate with the PIC(s), we must first get their IO base
+To communicate with the PIC(s), we must first get their IO base
 addresses, here are some definitions for that:
 
 ```c
@@ -34,7 +33,7 @@ addresses, here are some definitions for that:
 #define PIC2_DATA   (PIC2+1)
 ```
 
-We communicate to the PIC (WHEN INITIALIZING) using Initialization
+We communicate to the PIC (when initializing) using Initialization
 Command Words (ICWs) There's 4: 1 handles the start of initialization,
 2 handles where the interrupt vector begins, 3 handles how the master
 and slave are connected, and 4 handles the mode. Here are some ICW codes
@@ -56,13 +55,13 @@ that I have defined:
 #define ICW4_SFNM 0x10
 ```
 
-These constants represent the bit flags used when initializing the PICs
+These constants represent the bit flags used when initializing the PICs.
 We will use `ICW1_ICW4` to show that an ICW4 will follow during initialization,
 and `ICW1_INIT` to place the PICs into initialization mode. Finally, `ICW4_8086`
 selects the 8086-compatible interrupt mode that we want to use.
 
 Let's have a look at our function definitions for Setting up the PIC,
-setting up IQRs and handling IQRs:
+setting up IRQs and handling IRQs:
 
 ```c
 void irq_handler(registers_t* regs);
@@ -95,12 +94,12 @@ extern void irq15(void);
 
 Here we have 3 helper functions `outb` simply sends a byte to I/O, `inb`
 receives a byte from I/O, `io_wait` is a simple way of introducing a small
-delay between I/O operations. It writes to port `0x80`, which was
-traditionally used for POST diagnostics and is generally safe to use for this purpose.
-(real timeouts will come when we make our timer driver, but what we have here isn't bad)
+delay between I/O operations.
+(real timeouts will come when we make our timer driver, but what we have here isn't bad for
+the purpose).
 
 Now that we know the helper functions, let's have a look at the
-`pic_remap` function first, as this should be the first step in our logic
+`pic_remap` function first. This should be the first step in our logic
 of handling the PIC. The function looks like this:
 
 ```c
@@ -151,9 +150,9 @@ the OR operator to say that we are initializing and performing
 an ICW4 after this. For ICW2, we tell each PIC which interrupt-vector range
 it should use. The master starts at `0x20` (32) and the slave starts
 at `0x28` (40), so the master handles vectors 32-39 and the slave
-handles vectors 40-47. Next tell the master that the slave is
+handles vectors 40-47. Next we tell the master that the slave is
 connected to its IRQ line by sending 4 to the master's data port. 
-After this, tell the slave that it is connected through the master's IRQ2
+After this, we tell the slave that it is connected through the master's IRQ2
 line by sending 2 to the slave's port. We then select x86 mode and
 then restore the masks.
 
@@ -179,7 +178,7 @@ io_wait:
 Simple, remember to add global statements so they are visible to C.
 
 That's PIC remapping all set up now we can look at setting it up with
-the IDT, this is similar to what we did before with the ISRs, First
+the IDT. This is similar to what we did before with the ISRs. First
 let's set them up when initializing the IDT.
 
 ```c
@@ -248,7 +247,7 @@ IRQ 15, 47
 
 Unlike our CPU exceptions, hardware IRQs do not automatically push an error
 code. We push 0 ourselves so that the stack layout matches the 
-structure expected by our common handler. We then push the interrupt vector number.
+structure expected by our common handler. Then we push the interrupt vector number.
 Then we have our stub which is the same other as the function we call:
 
 ```x86asm
@@ -279,8 +278,7 @@ void irq_handler(registers_t* regs) {
 }
 ```
 
-The text is there for later testing. There is another thing
-we do. EOI stands for End Of Interrupt. It's a command sent 
+The text is there for later testing. EOI stands for End Of Interrupt. It's a command sent 
 to the PIC to tell it that we have finished handling the interrupt.
 The PIC then cleans up for
 us rather than us manually having to return or something. Here's our
@@ -310,5 +308,5 @@ activates interrupts. Now when we run our code, the timer should repeatedly trig
 IRQ0. Since IRQ0 has been remapped to interrupt vector 32, the CPU will enter our `irq0`
 handler, which eventually calls `irq_handler()`. We should therefore see `IRQ` 
 repeatedly printed to the terminal. This is done by the timer. Which we will be
-writing drivers for as our next step.
+writing drivers for next.
 

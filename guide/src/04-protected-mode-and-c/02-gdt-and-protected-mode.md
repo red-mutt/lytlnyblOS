@@ -5,7 +5,7 @@ have a complete GDT we first need 3 descriptors, one is the null
 descriptor which is just 64 bits of 0. The second is the kernel space
 code descriptor. The third is the kernel space data descriptor. We could
 also make descriptors for the user space, but I will refrain from doing
-that for now.
+that for now as making the user space will come much later on.
 
 First let's define the null descriptor, which looks like this:
 
@@ -29,21 +29,20 @@ gdt_code:
 
 #### The base:
 
-The comments I left here are pretty useful. You will remember the
-descriptor structure from the previous chapter. We set All the Base
+The comments I left here are pretty useful as they describe descriptor structure.  
+We set all the Base
 to 0 because we want the starting address for our kernel space code to
-be address 0, this is because with our descriptor we are essentially
-making a flat memory model so whenever we reference an address, for
-example `0xB8000` for writing to the screen with VGA, we access this
-address using the base + offset (the offset being 0xB8000 which is also
-the actual address). It makes it so we don't have to factor in a
+be address 0. This is because with our descriptor we are essentially
+making a flat memory model so whenever we reference an address. For
+example writing to `0xB8000` (for VGA output), would be accessed 
+via the base + offset (`0 + 0xB8000`). It makes it so we don't have to factor in a
 base to get to the addresses we want.
 
 #### The limit:
 
-The limit tells us how much memory the segment is allowed to access, we
+The limit tells us how much memory the segment is allowed to access. We
 set it all to F because this is our kernel, so we want it to be able to
-access everything that is in memory.
+access everything that exists in memory.
 
 #### The access byte
 
@@ -60,18 +59,17 @@ P DPL DPL S E DC RW A
     set to 0, and we try to access the segment, the CPU will fault.
 -   **The Descriptor Privilege Level (DPL)** is self-explanatory, we set
     it to 0 because we want the highest privilege.
--   **The Descriptor Type (S)** states what kind of descriptor it's, if
+-   **The Descriptor Type (S)** states what kind of descriptor it is, if
     this is set to 1 it's a normal code or data segment, if 0, it's a
-    system descriptor such as a `LDT`, and we don't need that yet
+    system descriptor such as a `LDT`. We don't need that yet
 -   **The Executable (E)** when set to 1 means that it's a code
     segment, when zero it represents data
 -   **DC stands for Direction/Conforming** When set to 0 it's a
     non-conforming code segment, this means that only code running at
     the correct privilege level may enter it, if DC was 1 then code 
     running at the same or a lower privilege level may enter the segment
--   **Read/Write (RW)** when set to 0 means executable only, but it can
-    not be read, so code cannot be read as data, so we should set RW to
-    1 so it can be executable and readable
+-   **Read/Write (RW)** when set to 0 means executable only.
+    We should set RW to 1 so it can be executable and readable
 -   **The access bit (A)** states whether the descriptor has been accessed.
     The CPU automatically sets this bit when the segment is accessed.
 
@@ -86,7 +84,7 @@ G D L AVL
 1 1 0 0
 ```
 
--   **Granularity (G)** being set to 1 makes our limit be measured in
+-   **Granularity (G)** being set to 1 makes our limit get measured in
     4KiB blocks rather than bytes
 -   **Default Operand Size (D)** being set to one states the segment is
     32 bits instead of 16
@@ -110,8 +108,8 @@ gdt_data:
 The only difference here is that we turn off the executable flag as this
 is a data segment and not a code segment.
 
-The final part of the GDT is we need some memory that we will load into
-the global descriptor table register, this will include the size of the
+The final part of the GDT is data that we will load into
+the global descriptor table register. This will include the size of the
 GDT and the start address. Mine looks like this:
 
 ``` x86asm
@@ -123,9 +121,9 @@ gdtr:
 
 ## Going into Protected mode
 
-And that's the end of our GDT and all the data we need, now
+And that's the end of our GDT and all the data we need. Now
 we can start entering the GDT, we can do that with this block of
-instructions
+instructions:
 
 ```x86asm
 enter_protected:
@@ -139,11 +137,11 @@ enter_protected:
     jmp CODE_SEG:p_mode_main
 ```
 
-This is essentially 3 things, we first use `cli` which disables maskable 
-hardware interrupts, we then load the descriptor table with `lgdt`, and then we set 
-the protection enable bit in the control register, after this we then
+This is essentially 3 things. We first use `cli` which disables maskable 
+hardware interrupts. We then load the descriptor table with `lgdt`, and then we set 
+the protection enable bit in the control register, After this we then
 perform a far jump into the `p_mode_main` label (which we will define
-later) using the code descriptor
+later) using the code descriptor.
 
 ```x86asm
 p_mode_main:
@@ -159,7 +157,7 @@ hang:
     jmp hang
 ```
 
-This is our code for our `p_mode_main`, it's simple, we just set the data
+This is our code for our `p_mode_main`. We just set the data
 segment registers. If we wanted, we could replace `CODE_SEG` with `08h`,
 as this is the value calculated by `gdt_code - gdt_start`. We then load
 the data segment selector, 10h, into our other segment registers.

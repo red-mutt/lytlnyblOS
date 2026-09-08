@@ -1,7 +1,7 @@
 # Part V : VGA Text Mode
 
 In this chapter we are making a convenient way to output text to the screen
-using the VGA text buffer we wrote to previously when we first reached C. This
+using the VGA text buffer we wrote to when we first reached C. This
 task is a lot more like regular programming, so I will allow some creative
 freedom. Here is the header file that I have created:
 
@@ -107,11 +107,11 @@ void vga_text_put_entry_at(
 ```
 
 All these definitions are pretty self-explanatory, other than the final
-function, which just writes a char without considering our main struct. For this
+function. Which just writes a char without considering our main struct. For this
 part of the guide I'll just give you all the implementations for my functions.
 All this code is simple C with no OS-specific content. Try and use my
-implementations as a rough guide and not as law, you can even make your own functions for writing
-text entries instead of just characters as I did. Here are my implementations:
+implementations as a rough guide and not as law. You can even make your own functions for writing
+text entries instead of just characters as I did. 
 
 ```c
 #include "vga_text.h"
@@ -245,12 +245,12 @@ void vga_text_put_entry_at(
 
 `vga_text_putchar()` writes a character at the current cursor position, but it does not move
 the cursor. The higher-level writing functions are responsible for moving the cursor.
-This is the inverse to what you might expect to `putfoo()` functions, so I just thought I'd point
+This is the inverse to what you might expect for `putfoo()` functions, so I just thought I'd point
 that out.
 
 The decimal and hexadecimal functions currently assume that there is enough
 space remaining on the current row. Unlike `vga_text_write()`, they do not handle reaching
-the end of a row, so just keep mind of that if you ever wish to use this implementation near the 
+the end of a row, so just keep mind of that if you ever wish to use this near the 
 end of a row.
 
 And that's essentially this section complete.

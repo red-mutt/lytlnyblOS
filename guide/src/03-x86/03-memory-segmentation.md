@@ -10,20 +10,20 @@ You could even skip this chapter and return to it in future when it's mentioned 
 
 What is memory? Well, physically, we can think of memory as just an
 array of bytes, each having a memory address that is just a numerical
-value, which we commonly store in base 16; this is our physical view of memory, 
-we need a logical view of memory that can make a lot of things much
+value. Which we commonly store in base 16; this is our physical view of memory.
+We need a logical view of memory that can make a lot of things much
 easier. This is where memory segmentation comes in.
 
 Memory segmentation in x86 architecture is a mechanism that divides the
 address space into segments to allow for more flexible memory management and
 protection. Understanding is important when developing an
 operating system for x86 platforms, as in protected mode, memory segmentation is 
-part of the address translation process. You can configure it to work alongside
+part of the address translation process. However, you can configure it to work alongside
 other memory management methods like paging.
 
 Memory segmentation isn't really used in the modern day; it's an old way
 of managing the address space, and modern operating systems mainly use 
-paging for memory management, which we will use in our operating 
+paging for memory management. We will use this in our operating 
 system; we'll get into that much later.
 
 Memory segmentation works differently in real mode and protected mode.
@@ -32,8 +32,8 @@ then looking at how it's done in real mode.
 
 ## How does memory segmentation work? An overview
 
-First, let's look at a basic overview of how memory segmentation works,
-segmentation is where the address space is divided into parts called segments.
+First, let's look at a basic overview of how memory segmentation works.
+Segmentation is where the address space is divided into parts called segments.
 Each segment can contain related code or data. To access data inside a
 segment, each byte is referred to by its own offset. A program can use different
 segments in x86; three commonly used segments are:
@@ -91,7 +91,7 @@ called a far jump. To do far jumps, you can do stuff like `jmp
 
 The same general idea applies to data and stack segments; it
 was just easy to show using and jump/call because the
-functionality is related to code, which is easy to manipulate code flow.
+functionality is related to code, and it's easy to manipulate code flow.
 An example for DS would be `lodsb`, and for `ss`, the `push` instruction.
 
 ## How was memory segmentation used in the bootloader? 
@@ -143,7 +143,7 @@ from a disk into memory. Which we see in this code here:
 ```
 
 Here, what we do first is store 0900h into the extra segment register, so 
-the BIOS read will use 0900h as the segment for the destination address, you see, the
+the BIOS read will use 0900h as the segment for the destination address. You see, the
 interrupt `13h`, `ah = 02h` service loads the requested sectors
 into the memory address `es:bx` (where `bx` is the offset).
 
@@ -193,7 +193,7 @@ descriptor that describes the segment when we need to get information
 about a segment, like the starting memory address (of said segment). As
 well as storing basic info, a segment descriptor stores info that helps
 in memory protection; this makes memory segmentation not just a logical
-way of viewing memory, but a method of memory protection, protecting
+way of viewing memory, but a method of memory protection. Protecting
 different segments on the system from each other, and not letting less 
 privileged segments manipulate data or call code in certain places
 (typically more privileged areas of the system).
@@ -313,7 +313,7 @@ flag is 1.
 The only application segments are code and data. If some application
 segment is referenced by currently running code, the processor will go
 to the descriptor of this segment and by reading the S flag (which
-should be 1), it should know that the segment in question is an
+should be 1). It should know that the segment in question is an
 application segment, but how does it know whether it's a data or code
 segment? This info is stored the type field in the
 segment descriptor.
@@ -340,12 +340,12 @@ code or data segment. Let's cover those individually.
 > to continue with this operating system, but it's nice to know.
 
 When the segment is a code segment, the second most significant bit of
-the type field is called the conforming flag (C flag), whereas the third
+the type field is called the conforming flag (C flag). Whereas the third
 most significant bit is called the readable flag (R flag), starting with
 the simplest being the R flag.
 
 The value of this flag indicates how the code inside the segment can be
-used, when the value of the R flag is 1, the code segment can be read,
+used. When the value of the R flag is 1, the code segment can be read,
 while a value of 0 means it cannot be read as data.
 
 The conforming flag is all to do with privilege levels. When a segment
@@ -437,7 +437,7 @@ And that wraps up all coverage of the descriptor, moving on.
 
 As we know, the GDTR stores the base address of the global
 descriptor table, but it also stores the limit of the table. To load a
-value into the register of the GDTR, follow the instruction:
+value into the register of the GDTR, 
 the `lgdt` instruction must be used; this stands for "load global
 descriptor table." It takes one memory operand containing the `GDT`'s linear base address and limit. 
 These operands structure should be similar to the actual
@@ -496,12 +496,12 @@ Then we have our usual index field, which we know much about.
 
 The TI flag is used by the processor to tell if the index in the segment
 selector is an index in the GDT or the LDT; when it is at 0, the index
-signifies the GDT; when it's 1, the index refers to the current LDT; the 
+signifies the GDT; when it's 1, the index refers to the current LDT. The 
 processor uses the LDTR to locate that LDT, and then the descriptor on the LDT is read.
 
 The RPL, as the name suggests, is to do with privilege levels; we
-mentioned before the DPL, the privilege level of a given segment, and
-there also exists the CPL. Which is the privilege level of the currently
-executing code. The RPL is part of the privilege checks performed when code
+mentioned the DPL before (the privilege level of a given segment), and
+there also exists the CPL (which is the privilege level of the currently
+executing code). The RPL is part of the privilege checks performed when code
 accesses a segment. The RPL is compared with the CPL and the descriptor's 
 DPL during privilege checks; it does not simply define the caller's privilege level.
