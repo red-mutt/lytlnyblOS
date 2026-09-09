@@ -47,7 +47,7 @@ and helps everyone who reads the guide after you. You don't need to know what to
 fix, just describe what you found:
 
 -  A typo or confusing explanation
--  A technical inaccuray
+-  A technical inaccuracy
 -  Code in the repo that no longer matches what the book describes
 -  A question about something that confuses you
 
