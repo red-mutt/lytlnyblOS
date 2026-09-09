@@ -11,12 +11,12 @@ as a precursor to something like Modern Operating Systems by Andrew S. Tanenbaum
 you through
 a simple implementation of an operating system whilst explaining every detail and providing you with a pretty
 nice baseline for what an operating system is.
-*"An idiot admires complexity, a genius admires simplicity"* - Some developer ;)
+*"An idiot admires complexity, a genius admires simplicity"*
 
-Although my main reason for writing this was to have something for myself to look back on whenever 
+My main reason for writing this was to have something for myself to look back on whenever 
 I want to go through the building blocks of
-making an operating system, which would be really helpful as it's all within my own writing. 
-As well as having proof that I know how to make one.
+making an operating system. But I have made an effort to get it up to standard for other
+people to read and learn from.
 Basically, I'm saying that I'm not looking to revolutionize operating 
 system teaching resources (although I do aim to provide a good one).
 
@@ -29,9 +29,9 @@ I am eager to improve both my technical writing and programming.
 
 Although this series of chapters aims to teach beginners, I recommend making sure you know a bit about how any flavour of 
 assembly works.
-And how C works. Alongside this I would also recommend you know basic concepts of computer science. 
+You need to know C too. Alongside this I would also recommend you know basic concepts of computer architecture. 
 Do you know what a compiler is?
-What about a linker? If so then you're OK to move on.
+What about a linker? Or the stack/heap? If so then you're OK to move on.
 That’s all the required knowledge you would need to get started.
 Though assembly is not too necessary, I explain assembly **way** more in depth than C, as it requires 
 a lot of familiarity to read naturally.
@@ -45,9 +45,9 @@ the code I provide as inspiration.
 ## Project Specifications
 
 My operating system is for x86_32 CPU architecture, stored on a virtual disk image, and made using C and ASM.
-There will also be some other tools used to make the development process a lot easier, such as GDB,
+There will also be some other tools used to make the development process a lot easier: such as GDB,
 to debug whatever I write, Makefiles to build the project, and QEMU to run the OS without having to 
-reboot my system repeatedly.
+reboot a system repeatedly.
 
 
 ### Why 32-bit?
@@ -69,10 +69,10 @@ The first step in making an operating system is to either set up or write a boot
 I will be making one; if you wanted to set one up, you could probably set up the kernel you write using GRUB,
 I know some people also use Limine.
 If a bootloader seems complex, don't feel afraid to use an existing one,
-writing a **good** bootloader can be just as large a project as making an operating system.
+writing a **good** bootloader can be just as large a project as writing an operating system.
 To write a bootloader, there will only be 3 steps.
 
-Step 1: printing in BIOS that we are booting the OS.
+Step 1: printing in BIOS.
 Step 2: reading the hard disk from the right place and loading the kernel into memory (in BIOS).
 Step 3: giving access to the kernel by jumping to where we loaded the kernel into memory (still in BIOS).
 
@@ -81,12 +81,10 @@ This means that we can’t use any OS interrupts to print to the screen, read fr
 or anything else we would have taken for granted when doing our regular programming.
 
 This is a good decomposition of the problem of writing our own bootloader; even now, you could even stop reading.
-And Google how to do these steps or even ask ChatGPT (although this is controversial, and I would only recommend it as 
-a last resort), 
-it’s good to decompose problems for a massive subject like making your own OS,
+And Google how to do these steps. It’s good to decompose problems for a massive subject like making your own OS.
 It can help us learn about the individual aspects rather than getting overwhelmed with information when we Google 
-“how to make a bootloader.”
-We can google “how to print to BIOS in NASM” and “how to read from a hard disk in BIOS NASM.”
+“how to make a bootloader.” Instead, you 
+can google “how to print to BIOS in NASM” and “how to read from a hard disk in BIOS NASM.”
 
 Even printing is complex without an operating system, so don’t get hung up if you take an hour trying to do any aspect of what
 we’re doing, especially if you’re just sitting there trying to understand some instructions or code 
@@ -105,4 +103,5 @@ some things along my way of writing this.
 
 ## Current State of the Project
 
-The guide is complete and is ready for use
+The guide is complete and has been proofread.
+However, contributing is allowed, check out the `CONTRIBUTING.md` on the [GitHub](https://github.com/red-mutt/lytlnyblOS).

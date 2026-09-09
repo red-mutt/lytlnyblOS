@@ -2,24 +2,51 @@
 
 ## A few words
 
-If you love coding, you're probably eager to get straight into the programming and make something that functions. 
-Well, good news. In this chapter, we will end with a fully functioning bootloader that loads a simple kernel that prints 
-a "hello world" message. 
-How exciting!
+In this chapter, we will write a fully functioning bootloader that loads a kernel that prints 
+a "hello world" message. I want to start you off with this so you can get a feel 
+for bare metal programming before you invest any more time into learning theory in part 3.
 
-This also shouldn't take that many lines of code, although the instructions can be complex, I will try to
-explain them all to the best of my ability in this chapter.
+A downside to starting with programming is that you will have to take my word
+for a lot of the instructions we write without understanding every single one. You will understand 
+everything written here after "Part III: Learning about x86." I will give explanations in this chapter,
+but they will be missing context and will be large oversimplifications. Please don't get discouraged
+if you read something and don't understand it in this chapter.
 
-Sadly, if you like hands-on experience, the next part will cover a lot of theory, but I will try to make it as concise 
-as possible.
+As a general rule in this book: each chapter will start off with a collection of context that you can use
+to develop your own implementation before you look at my code (with the sole exception of this one). 
+I highly recommend you try things out before using
+my solutions. You will learn much more if you do so. My code has also
+not cleaned thoroughly, so you should treat it as a rough guide and not as gospel.
+
+## How does the bootloader start?
+
+Before any code gets written, you need to understand how the first
+instructions we write actually get executed. When we run QEMU with our disk image,
+QEMU emulates a computer starting up. The virtual machine begins by running its firmware,
+which in this case provides the BIOS.
+
+The BIOS performs some basic hardware initialization and then looks for a bootable
+device. Our `print.img`/`kernel.img` is being used as that device. The BIOS reads
+the first sector of the image into memory at address `0x7C00` and checks that the final two
+bytes contain the boot signature `0xAA55`.
+
+If the signature is present, the BIOS treats the sector as a boot sector
+and transfers control to the code that was loaded at `0x7C00`. This means that the
+`start` label in our assembly code is where our bootloader begins executing.
+
+We don't really need to know how exactly the BIOS performs the operations spoken about.
+We only need to know that QEMU provides the virtual machine, the BIOS starts the machine
+and loads our boot sector, and then the CPU begins executing our code.
 
 ## Printing in BIOS
 
-To show how things work through this book, I will be providing a block of code and then 
-explaining it further. 
-After the block, I will also be providing some comments on ambiguous lines of code.
+When printing a string in BIOS, you need to print the string one character at a time in a loop.
+This is a common practice in assembly where you put the address of the string in the `SI` register,
+read a character from `[SI]`, check whether you've reached the end, send the character to whatever output
+mechanism is used, increment SI, and then repeat.
+The output mechanism is provided by the BIOS in the form of an interrupt.
 
-Here's some basic code I made for printing, which we will be expanding upon later, to do things like reading 
+Here's some basic code I made for printing, which we will be expanding upon later to do things like reading 
 from storage and loading into memory:
 
 ```x86asm
@@ -52,10 +79,8 @@ dw 0xAA55 ; specifies the end of the bootloader, recognised by bios
 
 ### The `start` section:
 
-Just a warning: there are a lot of things you might have to take my word on. 
-There will be things we need to do that I can't explain in a couple of sentences and would require a lot of explanation.
-This will all get explained in the "Learning about x86" chapters. The first example of this being
-these two lines:
+These first two lines are an example of something you will have to take my word on, as they
+relate to a larger topic called memory segmentation.
 
 ```x86asm
 mov ax, 07C0h
@@ -64,16 +89,13 @@ mov ds, ax
 
 With these two lines, the first line loads the value `0x07C0` into the `ax` register; 
 this is the segment value we use to access the bootloader at physical address `0x7C00`. 
-You will understand this fully when we cover x86 segmentation.
+You will understand this fully when we cover x86 segmentation, but all you need to know
+for now is that it makes it so all data accessed is accessed around the `0x7C00` (not `0x07C0`) 
+address.
 
-Just after that, we set `ds` to the value in `ax`. This will set the `ds` register, which represents the data segment, 
-to the value of `ax`, ensuring that the access through `ds` refers to the bootloader's data. 
+Just after that, we set `ds` to the value in `ax`. This will set the `ds` register, which represents the data segment.
 If we didn't include this line, `ds` could refer to a different segment, causing `mov si, title_string` and
 `lodsb` to access the wrong memory.
-
-This just about wraps up the hardest part to understand of our printing program, 
-and it's only hard to understand because we don't have the required knowledge 
-to comprehend our reasons for doing what we are doing.
 
 Continuing with the start section, we then have our next couple of lines, these being:
 
@@ -83,23 +105,21 @@ call print_string
 jmp $
 ```
 
-`mov si, title_string`: this first line is what tells us what string we need to print,
-Later in the code, we use `db` (define byte) to store our string in memory, as seen here:
-`title_string db 'Welcome to the lytlnybl bootloader!', 0` although you might suspect, like in a lot
-of programming languages, that we would just be passing the whole string to the `si` register.
-That is not what is happening; instead, we are passing the memory location of the first character in the string.
-This is because, like in C, strings are treated as arrays, which is terminated by a zero byte to mark the end 
-of the string, when we pass the first memory location, we would then increment this and print one character at a time
+`mov si, title_string` is what tells us what string we need to print.
+We also use `db` (define byte) to store our string in memory, as seen here:
+`title_string db 'Welcome to the lytlnybl bootloader!', 0`. 
+By setting `SI` to `title_string` the value in SI is the memory location of the first character in the string.
+Like in C, strings are treated as arrays, which are terminated by a zero byte to mark the end 
+of the string. We would then increment `SI` and print one character at a time
 when we go into our printing sections.
 
-These next two lines are simple: `call print_string` and `jmp $`,
-We first call `print_string`, which returns here after printing. The next line jumps to itself, creating an 
-infinite loop.
+`call print_string`
+calls the `print_string` label and returns after printing. `jmp $` jumps to itself, creating an 
+infinite loop and marking the end of the program.
 
 ### The `print_string` section:
 
-Let's just look at the whole of our print section, and I can explain it all in the
-coming paragraphs, so our print section goes as follows:
+Let's just look at the whole of our print section:
 
 ```x86asm
 print_string:
@@ -116,30 +136,30 @@ printing_finished:
     ret
 ```
 
-The first line `mov ah, 0Eh` moves the value `0Eh` into the `ah` register.
+`mov ah, 0Eh` moves the value `0Eh` into the `ah` register.
 In BIOS interrupt services, `ah` typically specifies the function requested. In this case,
 `0Eh` is the function number for teletype output.
 
 Then we enter the `print_char` loop, which repeats until the end of the string.
 
 The `lodsb` instruction (as said in the comment) loads the byte at the memory address
-pointed to by the `ds:si` (which in the beginning would be the first character) into the
-`al` register, and then increments the `si` register to point to the next byte in memory.
+pointed to by the `ds:si` (which means `0x7C00` + `SI` offset/address) into the
+`al` register. Then it increments the `si` register to point to the next byte in memory.
 
-Next we have `cmp al, 0` and `je printing_finished`
+Next we have `cmp al, 0` and `je printing_finished`.
 The first instruction compares the value in the `al` register
-with `0`, checking if it's the null terminator, which marks the end of the string.
-After that, we use `je` (which means jump if equal) instruction to jump to `printing_finished`
-if the value in `al` is the null terminator, which is 0.
+with `0`, checking if it's the null terminator.
+After that, we use `je` (which means jump if equal) to jump to `printing_finished`
+if the value in `al` is the null terminator.
 
-Then, simply, if we are not at the end of our string, we carry out our final
+Then, if we are not at the end of our string, we carry out our final
 instructions: `int 10h` and `jmp print_char`.
-The first of the two invokes the BIOS interrupt `10h` which
-is the BIOS interrupt for video services, and in this case, the value in `ah`
-is `0Eh` indicating a teletype output, so the byte in `al` is 
-interpreted as an ASCII character and is then printed to the screen.
+The first of the two invokes the BIOS interrupt for video services: `10h`.
+The value in `AH`
+is `0Eh` indicating a teletype output which makes the byte in `AL` be 
+interpreted as an ASCII character which is then printed to the screen.
 
-Then, in our final section, we return to the caller
+Then, in `printing_finished`, we return to the caller
 
 ### Final Two lines
 
@@ -155,14 +175,13 @@ the bootloader 510 bytes long. This ensures that the
 bootloader fills up most of the available space in the 512-byte sector reserved
 for the bootloader.
 The next line adds the boot signature, `0xAA55`, to the final two bytes of the sector.
-Which the BIOS uses to recognize the sector is bootable.
+This tells the BIOS uses to recognize the sector is bootable.
 When the BIOS loads the bootloader, it checks for this signature
 to make sure it's a legitimate bootable sector before proceeding with the boot process.
 
 That wraps up our printing, We use printing code a couple of times in the BIOS.
-Although I'm pretty sure when we move out of the BIOS, we will have to print differently, 
-as we will not have access to the BIOS teletype services.
-Now, it's time to move onto the next section, which will load our kernel into memory.
+Although when we move into C, printing will be a lot easier.
+Now, it's time to move onto the next section and load our kernel into memory.
 
 Before we move on, here is the Makefile for our code:
 
@@ -219,13 +238,12 @@ done:
     hello_string db 'Hello World!, i am lytlnyblOS', 0
 ```
 
-This code is close to the printing code we wrote earlier, with the main difference being how we set up the data segment;
+The kernel code is close to the printing code we wrote earlier, with the main difference being how we set up the data segment;
 instead of setting `ds` to a fixed segment value, we copy the current code segment from `cs` into `ds`. This makes `ds`
 and `cs` refer to the same segment.
 
-After focusing that much on printing earlier, this should be straightforward. 
 Now let's change the bootloader to accommodate 
-our new kernel, and I will then explain the need for the updated lines:
+our new kernel:
 
 ```x86asm
 start:
@@ -304,14 +322,13 @@ times 510-($-$$) db 0 ; pads the rest of the bootloader with 510 bytes, aiming f
 dw 0xAA55 ; specifies the end of the bootloader, recognised by bios
 ```
 
-There's not that much that is new, but this is where most of the code is that I can only explain on a surface level.
-I will explain it all as best as I can now in order of logical operation, and then in later chapters we can cover these x86
-concepts in the next chapter of this series.
+There's not that much that is new. Remember that if you don't understand much fret not as it will
+get explained in the next part of this book.
 
 ### The `load_kernel_from_disk` section:
 
-Carrying on in order of logical operation, after we print two times (for loading and intro messages), we go straight
-into our section for loading the kernel from disk. Its goal is to read the kernel from the disk and load it into memory.
+After we print two times (for loading and intro messages), we go straight
+into our label for loading the kernel from disk. Its goal is to read the kernel from the disk and load it into memory.
 
 We first set the segment address to `0900h` by loading it into `ax` and then copying it to `es`. The BIOS will load
 the kernel at `ES:BX`
@@ -333,11 +350,11 @@ as we want to load it into the start of our segment.
 Our final line is `int 13h`, which invokes the BIOS disk services using the parameters we set int he registers
 
 Then the only thing left to do is check for errors; the interrupt earlier would set the carry flag if there was an error.
-So we can just use `jc` (jump if carry) to jump to an error handling subroutine, which will just output a message signifying
-an error and then create an infinite loop.
+We can just use `jc` (jump if carry) to jump to an error handling subroutine, which will just output a message signifying
+an error with an infinite loop.
 
-That's all on reading from the disk; let's now look at the changes that we made to printing, which only really
-allow us to print multiple lines.
+That's all on reading from the disk; let's now look at the changes that we made to printing, which 
+allows us to print multiple lines.
 
 ### Printing Changes:
 
@@ -363,15 +380,15 @@ printing_finished:
     ret
 ```
 
-All this code is pretty basic; we first output the ASCII line feed (`10`) which advances the cursor to the next row.
-We then read the cursor position and reset the column to 0.
-Next, we read the current cursor position. This is not strictly necessary, but it gives us the current row in 
+We first output the ASCII line feed (`10`) which advances the cursor to the next row.
+Next, we read the cursor position and reset the column to 0.
+After that, we read the current cursor position. This is not strictly necessary, but it gives us the current row in 
 `dh` and column in `dl`. We then reset the column to `0` while keeping the current row.
 The final block moves the cursor to column 0 on the current row, which is also explained in the comments for the code.
 
-There we have it. After writing all this, you can say you've made your own operating system (albeit a simple one).
-It's a bootloader that loads a kernel, which then outputs a message, which may seem pretty dull, but just consider the fact
-that this was all done on bare metal hardware without an OS to support us, which is pretty cool.
+There we have it. After writing all this, you can say you've made your own bootloader and kernel (albeit simple ones).
+This may seem pretty dull, but just consider the fact
+that this was all done on bare metal hardware without an OS to support us.
 
 Here is the Makefile for the kernel and bootloader:
 
