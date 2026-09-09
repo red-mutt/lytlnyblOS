@@ -7,11 +7,12 @@ make it possible for them to run outside the kernel. While this
 section is pretty distinct from tasking, we are still building directly
 on top of it, and we will be editing the infrastructure for our tasking.
 This section on making the user space is also split up into its own
-two parts:
+three parts:
 
 -   User space: We get processes to run safely outside the kernel
 -   System calls: We allow user space processes to request services from
     the kernel
+-   libc: making the C standard library for user space
 
 On x86 32-bit architecture, the CPU defines four privilege levels, called rings 0
 though 3. For our OS, we are only going to use two of them: Rind 0 for the kernel
@@ -51,8 +52,8 @@ selector makes us execute at Ring 3.
 
 ### Rings are NOT enough
 
-If we set the ring level, our memory is still not protected,
-this is because we also need to set privileges within the page tables.
+If we set the ring level, our memory is still not protected.
+This is because we also need to set privileges within the page tables.
 Our page tables also have their own protection flags, including present, 
 writeable, and user. A page that user-mode code needs to access must be
 marked as a user page. Otherwise, a user-mode access to that page

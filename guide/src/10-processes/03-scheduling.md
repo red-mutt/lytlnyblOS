@@ -10,9 +10,9 @@ heap and all sorts of other stuff. The only things that we need to consider are 
 current process, the linked list of all processes and each process's state.
 
 The scheduling algorithm we are going to be using is round-robin, if you are
-unfamiliar with this it gives each process a time slice (basically a number
+unfamiliar with this: it gives each process a time slice (basically a number
 of ticks) to execute, and then you cycle through executing all the available
-processes for the given time slice.
+processes for a given time slice.
 
 ## The code
 
@@ -85,13 +85,13 @@ handle properly later if you wish to make the scheduler more complex.
 
 ### `schedule`
 
-This is the main thing we are calling from the timer to perform scheduling. If
+This is the main function we are calling from the timer to perform scheduling. If
 our scheduler tick count goes up to the value we have in our `time_slice` then we
-execute the bulk of the function. This is just where we find the next process
+execute the bulk of the function. The bulk being where we find the next process
 using the `get_next_process` function, and then if it's not the same as our
 current process we perform a context switch.
 
-The important thing to remember is that the scheduler does not perform the 
+The important thing is that the scheduler does not perform the 
 context switch itself. It decides which process should run next, and then the context
 switcher handles actually switching to it.
 

@@ -1,11 +1,11 @@
 # Part IX : Physical Memory Manager
 
-This chapter marks a larger milestone in our OS development, this is
+This chapter marks a large milestone in our OS development. This is
 where we start developing one of our first major kernel subsystems, this
 being memory management. Due to this subsystem being larger than previous
 parts, the next 3 chapters (including this one) is dedicated to memory
 management.
-The 3 parts are split into:
+The 3 chapters are split into:
 
 -   Physical Memory Manager (PMM): Manages actual RAM
 -   Virtual Memory Manager (VMM): Manages virtual addresses using paging
@@ -16,20 +16,19 @@ the PMM
 
 ## Where are we now?
 
-Currently, our OS is a kernel that is loaded into memory by the
-bootloader, the code can access memory, but only statically as defined
-at compile time, so we can create and access variables and their size,
-addresses and lifetime is all defined when we compile our OS. This is
-fine. But we will soon need to implement things where the size is
-unknown, which is where dynamic allocation comes in (which is what is
-made in chapter 11). But before we can implement things such as `malloc`,
-we need to know which memory is actually available for us to use. This
+Currently, Our kernel 
+can only access and create memory statically defined
+at compile time. Variables and their size,
+addresses and lifetime are all defined when we compile our kernel. This is
+fine, but we will soon need to implement things where the size is
+unknown. Before we can implement things such as `malloc`,
+we need to know what memory is actually available for us to use. This
 is where PMM comes in.
 
 Suppose we have 8GB of ram in our virtual machine, this 8GB has some
-things that already occupy the space, such as the BIOS and the kernel,
-so we need a way to know whether memory is used or not, so
-essentially the PMM is just a database of our ram usage, at a high
+things that already occupy the space, such as the BIOS, and the kernel.
+We need a way to know whether memory is used or not, so
+we use the PMM as a database for our ram usage. At a high
 level, think of it as:
 
 ```
@@ -70,22 +69,21 @@ main fields:
 We will not be using the memory map for long, it's just a piece of
 information that will allow us to initialize the PMM properly.
 
-Second, we need to split memory up into 4096 byte long frames, we do
+Second, we need to split memory up into 4096 byte long frames. We do
 this by creating a data structure that we will use to track our frames.
 The data structure we use will be a bitmap, this is just an array of
-bits where every bit maps to a frame, and every zero means free and
-every one means used.
+bits where every bit maps to a frame, every 0 means free, and
+every 1 means used.
 
-The third step is to then fill out in the bitmap the used and free
-memory, this is done in different ways for each part. For the kernel we
-must use a linker script to know the start and end location, and then
-the bootloader has known boot locations. Then everything else
+The third step is to fill out the bitmap with used and free
+memory. This is done in different ways for each part. For the kernel we
+must use a linker script to know the start and end location, and then for
+the bootloader we have a known boot location (`0x7C00`). Then everything else
 would be usable theoretically.
 
-Now after all these steps we can make `allocate_frame()` which just
-iterates the bitmap until a 0 is found. And then `free_frame()` just
-indexes and then frees the frame. And then this is fully how the PMM
-works.
+Now after all these steps we can make `allocate_frame()` which 
+iterates the bitmap until a 0 is found, sets it, then returns it. And then `free_frame()` which 
+indexes and then frees the frame. 
 
 ## The implementation
 
@@ -152,7 +150,7 @@ memory_map_entries equ 0x4FFC
 memory_map_buffer equ 0x5000
 ```
 
-For simplicity, we only check the carry flag here when checking if done. A
+> **_NOTE:_** For simplicity, we only check the carry flag here when checking if done. A
 complete implementation would also verify the `SMAP` signature returned
 in `EAX` and handle returned entry size.
 
@@ -162,27 +160,26 @@ memory map. Our algorithm here is a loop that repeatedly calls the BIOS E820
 service. Each successful call gives us another memory-map entry, which we store in 
 our buffer.
 
-At the start before everything we set `DS` to 0, this is because we want
+At the start we set `DS` to 0, this is because we want
 the exact addresses and don't want to factor in the offset used by
 memory segmentation. `EBX` is used as a continuation value that tells
-the BIOS which part of memory map to return next. `BP` is similar and will
+the BIOS which part of the memory map to return next. `BP` is similar and will
 increment for every **valid** entry found in the list. `DI` is set to the
 memory address of the buffer as it is the destination index. We also set
-`ES` to 0 too, as the data is written to ES:DI we set this every loop as
+`ES` to 0 too, as the data is written to ES:DI. We `ES` for every loop as
 it's possible the BIOS can change this.
 
 We then set `EAX` and `EDX` to values to signify that we are requesting the
 memory map. `ECX` is set to the size in bytes of the memory map entry we
-are requesting. We then call 15h, if the carry flag is set we jump to
+are requesting. `15h` is then called, if the carry flag is set we jump to
 the done label as there would have been an error.
-Next we add 24 to `DI` as this is where we store the next entry, and we
-increment `BP` of course. We then use test to check if `EBX` is 0. And if it
+Next we increment `BP` and add 24 to `DI` as this is where we store the next entry. 
+We then use test to check if `EBX` is 0. If it
 isn't, we go to the next entry. This is because the E820 service returns a 
-continuation value in `EBX`. When it returns 0, there are no more entries to 
-retrieve.
+continuation value in `EBX`. 
 
 In our done label we move `BP` to the memory address for the number of
-entries, then we move our previous data entry back
+entries, then we move our previous data entry back:
 
 ### The Header code
 
@@ -218,16 +215,15 @@ void free_frame(void* frame_address);
 #endif
 ```
 
-We define the intended frame size and the memory address for the bitmap
+We first define the intended frame size and the memory address for the bitmap
 for the frames. We then have a struct for our memory map entry. And then
 our functions are pretty basic. We have `init_pmm()`. We then have
-internal functions for setting and clearing frames, and then for
-printing the bitmap when testing. Not only that, 
-but we then have our functions to be used externally as we discussed before.
+functions for setting and clearing frames, printing the bitmap for testing,
+and our functions to be used externally as we discussed before.
 
 ### The Implementation file
 
-This is our largest section of code, I will first cover the `init_pmm()`
+I will first cover the `init_pmm()`
 function which is pretty long to get through and is the most complex
 thing we have made in our kernel so far. First in our code we define
 these globally:
@@ -342,9 +338,9 @@ regions can be divided into whole 4KiB frames. A complete PMM would handle regio
 starting or ending addresses are not frame-aligned.
 
 Foremost we retrieve the memory map and the number of entries from
-memory, and then we print out the memory map for debug purposes. We then
-define the max usable address, after this we iterate through the memory
-map checking if the entry is type 1 (which means usable ram). If it's free we
+memory, then we print out the memory map for debug purposes. We then
+define the max usable address, and iterate through the memory
+map checking if the entry is type 1 (which means free ram). If it's free we
 add the base and length and store the highest version of this value. The
 max usable address is used to get the total size in memory and calculate
 the number of frames.
@@ -412,14 +408,14 @@ divide by our frame size to get our frame index and then after that we
 iterate and set our bitmap to protect our kernel.
 Next we follow a similar pattern to do the same thing for the location
 in memory for our bitmap. Protecting the bootloader is simple because
-of boot sector occupies 512 bytes starting at `0x7C00`. We reserve the frame
+the boot sector occupies 512 bytes starting at `0x7C00`. We reserve the frame
 containing this address so the PMM cannot allocate it.
 We must also protect the memory used by our
 VGA text buffer so the PMM does not later allocate those frames to something else.
 
 That's the end of our init function, I have written this section of
 code that I call at the end to visualize our bitmap and make
-sure it's somewhat correct:
+sure it's correct:
 
 ```c
 void print_bitmap_summary() {
@@ -471,7 +467,7 @@ void print_bitmap_summary() {
 ```
 
 This uses a sliding window algorithm in order to print out the frames
-that have the same state together, this is done so we have a good way to
+that have the same state together. This is done so we have a good way to
 debug our bitmap without taking up the whole screen.
 
 ### Functions used externally
@@ -501,7 +497,7 @@ void free_frame(void* frame_address) {
 The freeing function just takes in the physical address of the frame and
 converts it to the index in the bitmap and then clears it.
 The allocating function iterates through the bitmap until a free frame is found.
-When it finds one, it marks the frame as used and returns it physical address.
+When it finds one, it marks the frame as used and returns its physical address.
 If there are no free frames, it returns `NULL`.
 Simple! And that's the PMM all done, now we can move onto the next
 stage of memory management.

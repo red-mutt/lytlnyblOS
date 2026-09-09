@@ -6,19 +6,17 @@ Not much context is needed for this section, all we need to know
 is that what we are making is simply used to switch between the process
 data structures that we have made.
 
-Actually there's one major issue that comes with making a context
+There's one major issue that comes with making a context
 switcher, and we experienced it partially when creating the main kernel
 process. This is the issue of how we can get the `ESP` and `EIP` values when
-the code currently being executed is switching the process. We
-wouldn't be able to get ESP and EIP for our actual process that we want
-to be saving.
+the code currently being executed is switching the process. 
 
 The solution for this has been lying right under our noses. It's
 interrupts, these save a state of the CPU when called and then return to
 the previous state by popping out the `registers_t` structure (the one
 that we defined in the interrupts file, not the process manager file).
 We won't have a specific interrupt for the context switcher, we will
-just use the timer for now, as this would be where we handle scheduling
+just use the timer, as this would be where we handle scheduling
 too.
 
 ## Coding
@@ -165,11 +163,10 @@ extern volatile uint32_t new_process_pid;
 We can then request a context switch from anywhere in our code.
 
 If you're confused how loading the process works by simply just loading
-process data into the `registers_t` structure, this is because when the
+process data into the `registers_t` structure. Think about when the
 IRQ wants to return after the timer interrupt is done, it pops all the
 data from the `registers_t` structure and then uses this to return to the
-previous place in code execution, so we can also use interrupts to our
-advantage to load processes, as well as save them.
+previous place in code execution.
 
 ## Simple test
 

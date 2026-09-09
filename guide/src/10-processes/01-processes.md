@@ -4,9 +4,9 @@
 
 The previous 3 chapters we had were each making one of the 3 major components of
 memory management. These next 3 parts are going to be formatted in the
-same way but instead of making memory management we are making the
+same way but instead for the
 process management subsystem. Currently, our kernel just makes the CPU
-execute one instruction after another from one stack. Multitasking and 
+execute one instruction after another. Multitasking and 
 running multiple things at the same time currently doesn't exist;
 this is what we want to create.
 
@@ -59,8 +59,8 @@ that info in detail:
     `PID = 5` means process number 5.
 2.  CPU state: The CPU has its registers like:
     `EAX, EBX, ECX, EDX, ESP, EBP, EIP and EFLAGS` that describe what
-    the CPU is doing. If we switch away from a task, we need to store
-    these values for when we return.
+    the CPU is doing. If we switch away from a task, we need to restore
+    these values when we return.
 3.  Page Directory: A process must have a pointer to its page
     directory, when the process runs, the page directory must be loaded
     into CR3.
@@ -69,29 +69,29 @@ that info in detail:
 5.  State: This contains what is happening with the process, for example,
     the state can say that it's running etc
 6.  Linking to other processes: The kernel needs a way to find all
-    processes, so each process can point to the next one, and then if we
-    need to store multiple we can store them as a linked list.
+    processes, so each process can point to the next one, and 
+    we can store them as a linked list.
 
 ### Process lifetime
 
-After creating structure, we need to make code that manages these
+After creating process structures, we need to make code that manages these
 structures. Each process has a lifecycle, Creating a process is made by
 simply assigning the next available PID, mapping a page for the stack,
-setting the initial CPU state (as the process has never run before). And
-then it must be added to the process list.
+setting the initial CPU state, and
+adding it to the process list.
 
 The process list is just the way the kernel stores every process that
-exists. Just like before with the heap, we use a linked list,
-you have freedom here, you can use an array if you want, you have
-some issues deciding how big it should be, what happens when it fills,
-and how entries are removed.
+exists. Just like before with the heap, we use a linked list.
+You have freedom here; you can use an array if you want, but you'll have
+issues deciding how big it should be, what happens when it fills,
+and how entries get removed.
 
 After being added to the process list we can make some functions for
 process lookup to find a process by PID. When we delete a process we
-just delete it from the process list by skipping over it. You would also
+remove it from the process list by skipping over it. You would also
 then need to free its memory by freeing its stack and destroying the
 page directory for user processes. It's an important distinction that
-we are currently **ONLY** making kernel processes, these would use the
+we are currently **ONLY** making kernel processes. These would use the
 kernel page directory and hence wouldn't have their page directory be
 made free.
 
@@ -100,9 +100,9 @@ really need to do this right about now.
 
 ### THE KERNEL IS RUNNING!?!?
 
-The kernel, at this stage in our OS is running an infinite loop, how do
+The kernel, at this stage in our OS is running an infinite loop. How do
 we take this already running code and build it into our tasking
-structure, to cope with this, when we initialize the process manager, we
+structure? To cope with this, when we initialize the process manager, we
 must immediately create a `process_t` representing the current kernel
 execution. Later, when we make the context switcher, we will already have somewhere
 to save the kernel's register state.
@@ -182,7 +182,7 @@ in our OS this will just be an invalid PID, but later we could use this
 to refer to an idle process or something.
 
 Next we define the size of the stack for kernel processes as 16Kib,
-after this we have an enumerator for all of our process states, let's
+after this we have an enumerator for all our process states, let's
 look at them:
 
 -   `PROCESS_RUNNING`: The process is currently executing on the CPU.
@@ -195,8 +195,8 @@ look at them:
 -   `PROCESS_TERMINATED`: The process has finished execution and should no
     longer be scheduled
 
-For the registers data structure it's a lot similar to the one we had
-with our interrupts, but instead we removed things that are useless like
+The registers data structure is a lot similar to the one we had
+with our interrupts. Here, we removed things that are useless like
 the error code and interrupt number.
 
 For the data structure for the processes, we simply have the PID, the
@@ -205,7 +205,7 @@ state of the process a pointer to the next process, a pointer to the
 page directory and finally a pointer to the stack.
 
 Our functions then are pretty simple, we have initialization, creation,
-destruction and searching.
+destruction, and searching.
 
 The last thing I haven't mentioned is the `kernel_stack_bottom` as an
 external variable, for this we need to look all the way back when we moved
@@ -308,7 +308,7 @@ kernel_stack_bottom:
 kernel_stack_top:
 ```
 
-There are 2 things we have changed here. The first thing that has
+2 things have changed here. The first thing that has
 changed is in the `p_mode_main` label. We change the value that we move
 into esp from `0x9000` to `kernel_stack_top`. At the bottom we then have
 another addition, this is just memory that we reserved for the main
@@ -463,8 +463,8 @@ which will give us more control over the address spaces, as we have to
 control page permissions and stack size.
 
 We then set general purpose registers to 0, set `EIP` to the task address
-(which is given to the function). And esp is set to the top
-of the stack (as stack grows downward in memory). CS and DS are then set
+(which is given to the function). And `ESP` is set to the top
+of the stack (as stack grows downward in memory). `CS` and `DS` are then set
 to the code and data segments that we created back when we created our
 GDT. We then give a sensible `EFLAGS` value and set the page directory
 to the `kernel_directory` which can be made public by including:

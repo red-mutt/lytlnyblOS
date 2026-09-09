@@ -3,18 +3,16 @@
 ## Some context
 
 Now that we have already conquered the Physical Memory Manager (PMM) and
-we have our 4096 byte physical frames. Now we must fulfil the VMM's job
-which is to make software (which is currently only our kernel) into
-thinking it has a contiguous and private block in memory, when in
-reality it's divided up into 4KiB frames. This is done by the CPU's
-memory management unit (MMU) which is a physical piece of hardware (so we
-are back to writing drivers).
+we have our 4096 byte physical frames. We must now fulfil the VMM's job
+which is to make software (which is currently only our kernel) 
+think it has a contiguous and private block in memory. When in
+reality it's divided up into 4KiB frames. 
 
-Currently, the CPU treats all addresses as physical, but after this
-section all addresses will be treated as a virtual address. A virtual
+Currently, the CPU treats all addresses as physical. After this
+section all addresses will be treated as virtual addresses. A virtual
 address is simply just a fake address that the CPU translates into a
-physical one. Currently, we already have a pretty simple paging system,
-this is where the virtual address = the physical address.
+physical one. This translation process is done by the CPU's
+memory management unit (MMU) which is a physical piece of hardware.
 
 ## Why do we want to implement this
 
@@ -31,20 +29,19 @@ allowing different processes to use the same virtual addresses without interferi
 each other.
 
 The reason we make this is really only for infrastructure for future
-feature like processes, user mode and the heap. But right now with our
-kernel implementing paging will also allow for a form of memory
+feature like processes, user mode, and the heap. But 
+implementing paging will also allow for a form of memory
 protection where if we were to do an action that would corrupt memory it
 would instead cause a page fault.
 
 ## How x86 Paging works
 
-After we implement paging each CPU-generated address is now a virtual
-address, so it implements itself pretty silently. And then the paging
-unit translates to physical ram and then accesses without the program
-ever knowing this happened. With our paging, we need a structure to
-translate every possible virtual address into a physical address, we
-can't do this directly as that would result in 4Bil entries, so this is
-why we use a page directory and page table. We already have frames, so now our job
+After we implement paging, each CPU-generated address would get treated as a virtual
+address, so it implements itself pretty silently. The paging
+unit then translates to physical addresses and then accesses without a program
+ever knowing of this translation. With our paging, we need a structure to
+translate every possible virtual address into a physical address. 
+To do this we use a page directory and page table. We already have frames, so now our job
 is to just translate a virtual page to a physical frame.
 
 In 32-bit mode, each address is not treated as a single number any more
@@ -60,15 +57,15 @@ and is split into:
         10 bits            10 bits          12 bits
 ```
 
-First of all the bottom 12 bits are the offset. 2^12 = 4096, so you can
+First of all the bottom 12 bits are the offset. `2^12 = 4096`, so you can
 imagine what this might represent. This tells where inside the page
 we are. The next 10 bits select an entry inside the page table. Each
-page table has 1024 entries as 2^10 = 1024. The next 10 bits are the
+page table has 1024 entries as `2^10 = 1024`. The next 10 bits are the
 page directory index, which point to a specific page table.
 
 ### Page directory/table structure
 
-The page directory is a 1024 sized array which contains 32 bits, each
+The page directory is a 1024 sized array of 32-bit unsigned integers. Each
 entry is made up of a 20 bit page table address, and then 12 bits of
 flags:
 
@@ -83,11 +80,11 @@ The page table address is physical.
 We only really need to concern ourselves with the bottom 3 bits of the
 flags:
 
--   Bit 0 is the present flag if it's 0, the page table does not exist,
-    if it's 1, then it does
--   Bit 1 is the Writeable flag. 0 = read only, 1 = writeable
--   Bit 2 is the User flag, if 0, then the page table is kernel only, if
-    1 then it's user accessible.
+-   Bit 0 is the present flag, if it's 0, the page table does not exist.
+    If it's 1, then it does
+-   Bit 1 is the Writeable flag. 0 = read only, 1 = writeable.
+-   Bit 2 is the User flag, if 0, then the page table is kernel only. If
+    1, then it's user accessible.
 
 The page table has a similar structure:
 
@@ -105,16 +102,15 @@ instead of the page tables.
 
 After the creation and fulfilment of our page directories and tables, we
 then need to tell the CPU that we want to enable paging. The first step
-is to load Control Register 3 (CR3). This
-contains where the current page directory is. We must put the active
-directory within there. When processes are switched, the directory for
-the process will also be switched. (However for the current stage of our
-OS we will end with there only being one-page directory).
+is to load Control Register 3 (`CR3`). This
+contains where the current page directory is, and we must put the active
+directory in here. When processes are switched, the directory for
+the process will also get switched in `CR3`. 
 
 Then after this we must finally enable paging via changing CR0, which
 controls whether major CPU features are active. This will automatically
 activate paging and start translating addresses. All we need to do is
-allocate a page directory, Allocate a page table load CR3 and then
+allocate a page directory, allocate a page table, load CR3, and then
 enable paging. This seems easy, and this is because enabling paging is
 the easiest part of this chapter. The actual complexity comes from
 making our full virtual memory subsystem. We will cover this later in
@@ -124,8 +120,8 @@ paging up and running.
 ## The first implementation
 
 For our first implementation we are just basically making the init
-function and some extra functions to help it, as well as making the
-general structure for our VMM, but the structure is rather simple.
+function and some extra functions to help it. As well as making the
+general structure for our VMM. The structure is rather simple.
 
 ```c
 #ifndef VMM_H
@@ -150,10 +146,11 @@ extern void set_cr0();
 
 First we have our definitions, these are just flags for the page
 directory and page table entries as we discussed before. Then there are
-our data structures for our page table and page directory, it's simply
-just a 1024 long array of 32bit integers. Then we have our `init_vmm`
-function which we will be writing. This requires helper functions for
-setting our control registers.
+our data structures for our page table and page directory. It's simply
+just a 1024 long array of 32bit integers. We then have our `init_vmm`
+function which we will be writing. `set_cr3` and `set_cr0` are helper functions
+as we need to access assembly to do these things.
+
 Now let's look at the implementation for this:
 
 ```c
@@ -189,27 +186,27 @@ void init_vmm() {
 
 ### The global variables
 
-We have two global variables, the first is just the kernel directory,
-this is because we need to save the kernel directory and have a special
-one for it as it's the most critical program in an operating system.
+We have two global variables, the first is the kernel directory.
+The reason we store the kernel directory globally is that 
+it's the most critical program in an operating system.
 The current directory for now will always have our kernel
-directory loaded into it, but when we make processes and such we will
+directory loaded into it, but when we make processes we will
 need to switch directories to access different process as every process
-would typically have its own page directory.
+would have its own page directory.
 
 ### The init code
 
 To start our init code we allocate frames for our kernel directory and
-the page table that we will be using for our kernel currently, then we
-use the `memset` function that we made back in our interrupts code to set
-the memory of the table and directory to 0, this is going to be a common
-practice required for stuff like this, as memory isn't typically wiped,
+the page table that we will be using for our kernel currently. We also
+use the `memset` function that we made in our interrupts code to set
+the memory of the table and directory to 0. This will be a common
+practice for stuff like this, as memory isn't typically wiped,
 it's just set as free.
 
 After this we loop through and map each virtual address so that
 `virtual address = physical address`. We set the flags for being Present
 and writable, this is just so that when we turn on paging, we will still
-be able to actually accesses memory, as if we didn't do this, and we
+be able to actually accesses memory. If we didn't do this, and we
 tried to make a variable or do anything with memory, we would get a page
 fault as each address would result in a page not being present.
 
@@ -239,11 +236,10 @@ set_cr0:
 ```
 
 Just some simple code to load our desired values into the
-respective registers, if we then link this code and run our program and
-there are no faults, we should then have an operating system activated
+respective registers. If we then link this code and run our program and
+there are no faults, we would have a kernel
 with paging enabled. Perfect! That was simple, but now we should make
-the functions and architecture that the other parts of our kernel can
-use to map pages unmap pages and detect page faults.
+the full infrastructure for paging.
 
 ## Adapting the architecture
 
@@ -301,12 +297,12 @@ void page_fault_handler(registers_t* registers);
 #endif
 ```
 
-In our header we just have added functions, we have one for receiving
-CR2, which is used when we get to page faults. We then have our
+In our header we have only added functions. We have one for receiving
+CR2, which is used when we get to page faults. We have our
 functions for mapping pages, unmapping them, converting virtual
-addresses to physical ones, creating page tables and then handling page
-faults. These are all simple actions to conceptualize, but then we have
-something we haven't talked about. The TLB is essentially a cache for
+addresses to physical ones, creating page tables, and handling page
+faults. These are all simple actions to conceptualize, but we have
+something we haven't talked about: the TLB. The TLB is essentially cache for
 the most frequently used memory address translations, we won't need to
 interface with it for now other than flushing when we delete pages and
 tables.
@@ -503,9 +499,9 @@ void isr_handler(registers_t* regs) {
 ```
 
 The quality of the `page_fault_handler` function helps to find errors in
-our operating system in future, the more information we give about a
+our operating system in future. The more information we give about a
 page fault, the better, as we can then use this to fix any issues we
-have with memory access. In my function, CR2 contains the virtual
+have with memory access. CR2 contains the virtual
 address that the fault happened at, this is a crucial piece of info that
 we would definitely want to print.
 
@@ -559,13 +555,11 @@ flush_tlb_page:
 ```
 
 Flushing the whole TLB is pretty simple, as we just have to reload CR3
-with itself, and it all happens automatically, flushing a specific page
+with itself, and it all happens automatically. Flushing a specific page
 requires us to pass the virtual address to a special instruction that
 will flush the TLB for the specific page. Getting CR2 is the same as the
 other control register functions etc.
 
 And that's basically it for writing the VMM, pretty nice, all we have
-left is heap allocation, and then we are done with memory management
-(however these files will probably be adapted as other parts are
-created)
+left is heap allocation, and then we are done with memory management.
 
