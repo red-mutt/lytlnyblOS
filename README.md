@@ -22,7 +22,7 @@ just what it does.
 -  `blog_playground/` - Shows a history of the OS's creation, not intended for use and is unmaintained.
 
 ## Building and running
-You will need:
+No special hardware is required for this project. You only will need:
 -  NASM
 -  An `i686` cross-compiler for C
 -  QEMU
