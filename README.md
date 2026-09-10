@@ -1,7 +1,7 @@
 # lytlnyblOS
 
 A small, from scratch 32-bit operating system, built to teach beginners practically
-about OS development. Built alongside [The lytlnyblOS Book](https://red-mutt.github.io/lytlnyblOS/), 
+about OS development. Ran on a QEMU virtual machine. Built alongside [The lytlnyblOS Book](https://red-mutt.github.io/lytlnyblOS/), 
 a guide that walks through writing an OS from a 16-bit bootloader all the way through protected mode,
 interrupts, memory management, processes, a filesystem, userspace, and a working shell.
 
