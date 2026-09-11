@@ -8,6 +8,9 @@ interrupts, memory management, processes, a filesystem, userspace, and a working
 The code in this repo is the code taught in the book. Every part of it corresponds to something
 explained in the book, this is the whole point of the project.
 
+Here's a little video demo of what you'll be making:
+https://github.com/user-attachments/assets/c1995578-880c-4a0d-ab0e-32f5a33cbd11
+
 ## Read the book
 
 **[📖 red-mutt.github.io/lytlnyblOS](https://red-mutt.github.io/lytlnyblOS/)**
