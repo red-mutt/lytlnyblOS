@@ -10,7 +10,7 @@ explained in the book, this is the whole point of the project.
 
 Here's a little video demo of what you'll be making:
 
-https://github.com/user-attachments/assets/c1995578-880c-4a0d-ab0e-32f5a33cbd11
+https://github.com/user-attachments/assets/f02ed3cf-41a2-4a80-85b7-0d6aa5f0f7ae
 
 ## Read the book
 
