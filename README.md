@@ -12,6 +12,8 @@ Here's a little video demo of what you'll be making:
 
 https://github.com/user-attachments/assets/f02ed3cf-41a2-4a80-85b7-0d6aa5f0f7ae
 
+This may not look like much, but remember it's your own custom operating system that you'll have freedom to do whatever you want with by the end of the book! Every line of code will be written by you!
+
 ## Read the book
 
 **[📖 red-mutt.github.io/lytlnyblOS](https://red-mutt.github.io/lytlnyblOS/)**
