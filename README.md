@@ -19,7 +19,37 @@ This may not look like much, but remember it's your own custom operating system 
 **[📖 red-mutt.github.io/lytlnyblOS](https://red-mutt.github.io/lytlnyblOS/)**
 
 The book goes in depth explaining *why* something in the OS works the way it does, not 
-just what it does.
+just what it does. You'll make:
+
+- A bootloader
+- An entry into x86 Protected mode
+- GDTs & IDTs
+- VGA text mode
+- Interrupts
+- A timer driver
+- A keyboard driver
+- A memory manager
+- Paging systems
+- Processes
+- Scheduling
+- User mode
+- System Calls
+- A C standard libary
+- Filesystems
+- A MKFS
+- And finally, a shell
+
+All in this order
+
+## Project status
+
+The project is **complete, but with ongoing refinement.**
+
+The operating system and accompanying guide are complete from start to finish. The project currently covers the full journey from bootloader to working
+user-space shell and has not been abandoned. I consider this project *feature complete for its educational goals*. Future work will be mainly
+focused around refining the guide, improving explanations, fixing mistakes, and making the experience easier for others to follow.
+
+Feedback and corrections are welcome, particularly from people working through the guide themselves. Feel free to read [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ## What the directories in the repository are for
 
@@ -38,9 +68,8 @@ No special hardware is required for this project. You only will need:
 `make run` in `lytlnybl/` assembles the bootloader and kernel, links them, writes the result
 into the disk image, and boots it in QEMU.
 
-## Status
-
-The guide and its accompanying source are complete, start to finish.
+This book assumes that you have access to many unix-like command, like `dd`, `rm`, `mkdir`, and `cp`. Linux is the primary supported environment.
+**Windows users can use WSL.**
 
 ## Found an error in the guide?
 
