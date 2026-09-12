@@ -9,6 +9,7 @@
 #include "filesystem/fs_manager.h"
 #include "kernel/drivers/ata.h"
 #include "tasks/loader.h"
+#include "filesystem/fs.h"
 
 #include <stdint.h>
 
@@ -28,7 +29,7 @@ void kernel_main(void)
     vga[1] = 0x02;
 
     vga_text_init(&terminal);
-    vga_text_writeline(&terminal, "Welcome to the lytlnybl kernel in protected mode");
+    vga_text_writeline(&terminal, "Welcome to the lytlnyblOS!");
 
     idt_init();
 
@@ -40,7 +41,18 @@ void kernel_main(void)
     timer_init(100);
     keyboard_init();
     init_tss();
+    fs_manager_init();
 
+    vga_text_set_color(&terminal, VGA_COLOR_GREEN, VGA_COLOR_BLACK);
+    vga_text_writeline(&terminal, "Kernel multiprocessing tests:");
+    process_t* test_proc= create_process(test_process, PROCESS_KERNEL);
+    timer_wait_ms(10);
+    vga_text_writeline(&terminal, "BACK IN MAIN PROCESS");
+    vga_text_set_color(&terminal, VGA_COLOR_WHITE, VGA_COLOR_RED);
+
+
+    vga_text_writeline(&terminal, "Memory allocation tests:");   
+    vga_text_set_color(&terminal, VGA_COLOR_WHITE, VGA_COLOR_BLACK);
     uint32_t* numbers = (uint32_t*)kmalloc(5 * sizeof(uint32_t));
 
     for (int i = 0; i < 5; i++) {
@@ -54,13 +66,8 @@ void kernel_main(void)
     }
     vga_text_writeline(&terminal, "");
 
-    kfree(numbers);
-
-    process_t* test_proc= create_process(test_process, PROCESS_KERNEL);
-    timer_wait_ms(10);
-
-    vga_text_writeline(&terminal, "back in main");
-    
+    kfree(numbers); 
+    vga_text_set_color(&terminal, VGA_COLOR_WHITE, VGA_COLOR_RED);
 
     uint8_t test_write[512];
     uint8_t test_read[512];
@@ -86,31 +93,31 @@ void kernel_main(void)
 
     // FILE SYSTEM TESTS    
 
-    init_ata();
-    fs_mkdir("/dir1");
-    fs_mkdir("/dir2");
+    vga_text_writeline(&terminal, "Filesystem tests:");
+    vga_text_set_color(&terminal, VGA_COLOR_LIGHT_BLUE, VGA_COLOR_BLACK);
+
+    
     fs_touch("/file.txt");
 
+    fs_touch("/notes.txt");
+
+    vga_text_writeline(&terminal, "Root directory contents:");
     fs_ls("/");
-    fs_touch("/dir1/notes.txt");
-    fs_ls("/dir1");
-    fs_rm("/dir2");
-    fs_ls("/");
+    vga_text_set_color(&terminal, VGA_COLOR_LIGHT_BLUE, VGA_COLOR_BLACK);
+    vga_text_writeline(&terminal, "Bin directory contents:");
     fs_ls("/bin");
 
-    int32_t fd = fs_open("/dir1/notes.txt");
+    int32_t fd = fs_open("/notes.txt");
 
     const char* msg = "Hello filesystem!";
     fs_write(fd, (void*)msg, 17);
     fs_close(fd);
-    fd = fs_open("/dir1/notes.txt");
-    char recv[18];
-    fs_read(fd, (void*)recv, 17);  
+    fd = fs_open("/notes.txt");
 
 
-    recv[17] = '\0';
-    vga_text_writeline(&terminal, recv);
-
+    vga_text_set_color(&terminal, VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    vga_text_writeline(&terminal, "Running shell:");
+    vga_text_set_color(&terminal, VGA_COLOR_WHITE, VGA_COLOR_RED);
     load_program("/bin/shell");
     //load_program("/bin/user_test");
 
