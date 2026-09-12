@@ -101,7 +101,7 @@ Thanks to the internet for providing me with great resources that helped me expl
 some things along my way of writing this.
 
 
-## Current State of the Project
+## Contributions welcome!
 
-The guide is complete and has been proofread.
-However, contributing is allowed, check out the `CONTRIBUTING.md` on the [GitHub](https://github.com/red-mutt/lytlnyblOS).
+The guide is complete but is currently being refined.
+Contributing is heavily encouraged! Check out the `CONTRIBUTING.md` on the [GitHub](https://github.com/red-mutt/lytlnyblOS).
