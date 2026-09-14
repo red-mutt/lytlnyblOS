@@ -1,24 +1,26 @@
 # lytlnyblOS
 
-lytlnyblOS (little nibble OS) is a small, from scratch 32-bit operating system, built to teach beginners practically
+lytlnyblOS (little nibble OS) is a small, from-scratch 32-bit operating system, built to teach beginners practically
 about OS development. It runs on a QEMU virtual machine. Built alongside [The lytlnyblOS Book](https://red-mutt.github.io/lytlnyblOS/), 
 a guide that walks through writing an OS from a 16-bit bootloader all the way through protected mode,
 interrupts, memory management, processes, a filesystem, userspace, and a working shell.
 
 The code in this repo is the code taught in the book. Every part of it corresponds to something
-explained in the book, this is the whole point of the project.
+explained in the book; this is the whole point of the project.
+
+Please use the website: **[📖 red-mutt.github.io/lytlnyblOS](https://red-mutt.github.io/lytlnyblOS/)** for reading, not the GitHub repository, for a better experience.
 
 Here's a little video demo of what you'll be making:
 
 https://github.com/user-attachments/assets/f02ed3cf-41a2-4a80-85b7-0d6aa5f0f7ae
 
-This may not look like much to some, but remember it's your own custom operating system that you'll have freedom to do whatever you want with by the end of the book! Every line of code will be written by you!
+This may not look like much to some, but remember it's your own custom operating system that you'll have the freedom to do whatever you want with by the end of the book! Every line of code will be written by you!
 
 ## Read the book
 
 **[📖 red-mutt.github.io/lytlnyblOS](https://red-mutt.github.io/lytlnyblOS/)**
 
-The book goes in depth explaining *why* something in the OS works the way it does, not 
+The book goes in depth, explaining *why* something in the OS works the way it does, not 
 just what it does. You'll make:
 
 - A bootloader
@@ -34,7 +36,7 @@ just what it does. You'll make:
 - Scheduling
 - User mode
 - System Calls
-- A C standard libary
+- A C standard library
 - Filesystems
 - A MKFS
 - And finally, a shell
@@ -43,7 +45,7 @@ All in this order
 
 ## Project status
 
-The project is **complete, with ongoing refinement.**
+The project is **complete, with ongoing refinement**
 
 The operating system and accompanying guide are complete from start to finish. The project currently covers the full journey from bootloader to working
 user-space shell. I consider this project *feature complete for its educational goals*. Future work will be mainly
@@ -58,7 +60,7 @@ Feedback and corrections are welcome, particularly from people working through t
 -  `blog_playground/` - Shows a history of the OS's creation, not intended for use and is unmaintained.
 
 ## Building and running
-No special hardware is required for this project. You only will need:
+No special hardware is required for this project. You will only need:
 -  NASM
 -  An `i686` cross-compiler for C
 -  QEMU
@@ -68,7 +70,7 @@ No special hardware is required for this project. You only will need:
 `make run` in `lytlnybl/` assembles the bootloader and kernel, links them, writes the result
 into the disk image, and boots it in QEMU.
 
-This book assumes that you have access to many UNIX-like command, like `dd`, `rm`, `mkdir`, and `cp`. Linux is the primary supported environment.
+This book assumes that you have access to many UNIX-like commands, like `dd`, `rm`, `mkdir`, and `cp`. Linux is the primary supported environment.
 **Windows users can use WSL.**
 
 ## Found an error in the guide?
@@ -88,7 +90,7 @@ fix, just describe what you found:
 
 ## Contributing
 
-Contributions are welcome, but scope is intentionally limited, please read 
+Contributions are welcome, but scope is intentionally limited; please read 
 [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
 ## License
