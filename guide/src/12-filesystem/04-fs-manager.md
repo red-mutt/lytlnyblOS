@@ -38,8 +38,8 @@ bool fs_rm(const char* path);
 #endif
 ```
 
-The `fs_file_t` type stores metadata for files that are currently open, they 
-will get stored in an array and will to track the offset into a file when 
+The `fs_file_t` type stores metadata for files that are currently open; they 
+will be stored in an array and will track the offset into a file when 
 reading and writing to it. `FS_MAX_OPEN_FILES` will be the size of this array.
 The array will be defined as such:
 
@@ -55,20 +55,20 @@ Every file descriptor beyond 2 is an index into this array that represents open 
 A path may look like: `/bin/user_test`. Where the first slash represents the root directory,
 `bin` is a directory within the root directory, and `user_test` is a program within `bin`.
 
-Our operating system's path directories will only be absolute, this means that there is no such thing
-as `cd` or a current working directory. Any time we want to access something it will be from root.
+Our operating system's path directories will only be absolute; this means that there is no such thing
+as `cd` or a current working directory. Any time we want to access something, it will be from root.
 
 `fs_fd_to_inode` accesses the array, applies the offset, and returns the inode number associated with the `fd`.
-This function will get used externally.
+This function will be used externally.
 
-Then we have the next four functions which are our primitive operations for interfacing with files:
+Then we have the next four functions, which are our primitive operations for interfacing with files:
 -   `fs_open` takes a path to a file, opens it (by adding it to the open files array), and returns the `fd` 
     number.
 -   `fs_close` takes a file descriptor and closes it.
--   `fs_read` reads from a file using a size and adds the bytes read from in `fs_file_t`.
--   `fs_write` same as the prior but with writing.
+-   `fs_read` reads from a file using a size and adds the bytes read from it in `fs_file_t`.
+-   `fs_write` same as the prior, but for writing.
 
-The next four functions are all self-explanatory, let's get into writing the
+The next four functions are all self-explanatory; let's get into writing the
 implementation file. And then I'll walk you through all the functions one by
 one.
 
@@ -427,7 +427,7 @@ treated as the same sequence as `/bin/user_test`.
 
 If any component (file or directory) cannot be found, or if a component name is too long
 for `FS_FILENAME_LENGTH`, the function returns `-1`. Otherwise, once every component has
-got resolved, it returns the inode number of the final component.
+been resolved, it returns the inode number of the final component.
 
 ### `fs_open`
 
@@ -451,7 +451,7 @@ int32_t fs_open(const char* path) {
 }
 ```
 
-This turns a path into an open file descriptor. We take a path, resolve it which
+This turns a path into an open file descriptor. We take a path, resolve it, which
 gets the inode number, find a free `open_files` slot, store `inode`, `offset`, and 
 return the file descriptor. The offset for a newly open file is 0, meaning
 that the first read or write begins at the start of the file.
@@ -511,7 +511,7 @@ int32_t fs_read(int fd, void* buffer, uint32_t size) {
 
 This provides a file-descriptor interface on top of the lower-level `fs_read_file` function.
 After a successful read, the offset gets incremented by the number of bytes read,
-so, a second call to `fs_read` continues from where the first one stopped.
+so a second call to `fs_read` continues from where the first one stopped.
 
 ### `fs_write`
 
@@ -540,7 +540,7 @@ int32_t fs_write(int fd, void* buffer, uint32_t size) {
 ```
 
 This works in the same way as `fs_read`, other than the fact that it calls `fs_write_file`.
-After the write succeeds, the offset gets advanced by number of bytes written.
+After the write succeeds, the offset gets advanced by the number of bytes written.
 
 
 ### `split_path`
@@ -617,15 +617,15 @@ bool fs_mkdir(const char* path) {
 }
 ```
 
-This is a path based interface for creating a directory. It does this:
+This is a path-based interface for creating a directory. It does this:
 
 1.  Splits the path into parent and name
 2.  Resolves the parent path to an inode.
 3.  Checks that the parent is actually a directory.
 4.  Passes the parent inode and name to `fs_create_directory`.
 
-That's all, the creation of the inode, directory block, and directory entry is
-all handled by lower level filesystem operations.
+That's all; the creation of the inode, directory block, and directory entry is
+all handled by lower-level filesystem operations.
 
 ### `fs_touch`
 
@@ -655,7 +655,7 @@ bool fs_touch(const char* path) {
 ```
 
 Follows the same pattern as `fs_mkdir`, but calls `fs_create_file()` instead.
-Like the previous, its job is to provide a convenient path based interface
+Like the previous, its job is to provide a convenient path-based interface
 for creating a regular empty file.
 
 ### `fs_rm`
@@ -685,9 +685,9 @@ bool fs_rm(const char* path) {
 }
 ```
 
-Path based removal operation, it: splits the path, resolves the parent directory,
+Path-based removal operation: it splits the path, resolves the parent directory,
 verifies that the parent is a directory, calls `fs_delete_file` with the parent inode
-and filename. Despite calling `fs_delete_file` can remove directories too (as mentioned earlier).
+and filename. Although calling `fs_delete_file` can remove directories too (as mentioned earlier).
 
 ### `fs_ls`
 
@@ -742,10 +742,10 @@ void fs_ls(const char* path) {
 }
 ```
 
-Uses lower level filesystem operations to provide listings of all components in a directory.
+Uses lower-level filesystem operations to provide listings of all components in a directory.
 Each block referenced by a directory inode is read using `fs_read_block`. The
 block gets interpreted as an array of `fs_director_entry_t` structures. Unused entries get skipped.
-For each valid entry, the inode gets read so that the manager can find out whether it's a file or a directory,
+For each valid entry, the inode gets read so that the manager can find out whether it's a file or a directory;
 this is then used to choose the display color before printing the name.
 If you do not wish to make a filesystem manager, this serves as a useful example of how different functions
 defined in the file system core get used to work together. 
