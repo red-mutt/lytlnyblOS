@@ -42,10 +42,56 @@ I do not want to keep anyone trapped in tutorial hell, so for all the chapters
 where it seems plausible (after the first 4), please try making your own implementation and use
 the code I provide as inspiration.
 
+## Table of Contents
+
+- **Part I: Introduction**
+  - [Introduction](introduction.md)
+- **Part II: Bootloading**
+  - [Bootloading](bootloading.md)
+- **Part III: Learning About x86**
+  - [x86 Operating Modes](03-x86/02-operating-modes.md)
+  - [x86 Memory Segmentation](03-x86/03-memory-segmentation.md)
+  - [x86 Run-Time Stack](03-x86/04-runtime-stack.md)
+  - [x86 Interrupts](03-x86/05-interrupts.md)
+- **Part IV: Protected Mode and C**
+  - [GDT and Protected Mode](04-protected-mode-and-c/02-gdt-and-protected-mode.md)
+  - [A Lesson in Debugging](04-protected-mode-and-c/03-debugging.md)
+  - [Entering C](04-protected-mode-and-c/04-entering-c.md)
+- **Part V: VGA Text Mode**
+  - [VGA Text Mode](05-vga-text-mode/01-vga-text-mode.md)
+- **Part VI: Interrupts**
+  - [Interrupt Descriptor Table](06-interrupts/02-idt.md)
+  - [Interrupt Service Routines](06-interrupts/03-isrs.md)
+  - [Programmable Interrupt Controller](06-interrupts/04-pic.md)
+- **Part VII: Timer**
+  - [Timer](07-timer/01-timer.md)
+- **Part VIII: Keyboard**
+  - [Keyboard](08-keyboard/01-keyboard.md)
+- **Part IX: Memory Management**
+  - [Physical Memory Manager](09-memory-management/01-pmm.md)
+  - [Virtual Memory Manager](09-memory-management/02-vmm.md)
+  - [Heap](09-memory-management/03-heap.md)
+- **Part X: Processes**
+  - [Processes](10-processes/01-processes.md)
+  - [Context Switching](10-processes/02-context.md)
+  - [Scheduling](10-processes/03-scheduling.md)
+- **Part XI: User**
+  - [User Space](11-user/01-user-space.md)
+  - [System Calls](11-user/02-syscalls.md)
+  - [libc](11-user/03-libc.md)
+- **Part XII: Filesystem**
+  - [Drivers](12-filesystem/02-drivers.md)
+  - [Filesystem Core](12-filesystem/03-filesystem.md)
+  - [Filesystem Manager](12-filesystem/04-fs-manager.md)
+- **Part XIII: Programs**
+  - [MKFS](13-programs/02-mkfs.md)
+  - [The Shell](13-programs/03-the-shell.md)
+  - [The End](13-programs/04-end.md)
+
 ## Project Specifications
 
 My operating system is for x86_32 CPU architecture, stored on a virtual disk image, and made using C and ASM.
-There will also be some other tools used to make the development process a lot easier: such as GDB,
+There will also be some other tools used to make the development process a lot easier, such as GDB,
 to debug whatever I write, Makefiles to build the project, and QEMU to run the OS without having to 
 reboot a system repeatedly.
 
@@ -54,13 +100,12 @@ reboot a system repeatedly.
 
 I've seen the sentiment in some places on the internet that goes something like "what? Why would you use 32-bit, 
 just use 64".
-And while this statement would have a lot of merit if we were developing a general purpose operating system,
-that does not apply to this project. If we were to use 32 bit the architectural complexity would just 
+And while this statement would have a lot of merit if we were developing a general-purpose operating system,
+that does not apply to this project. If we were to use 32-bit, the architectural complexity would just 
 increase without the main OS features changing.
 Long story short, I think that making a 32-bit OS provides a better learning-to-complexity ratio than 64-bit.
-It could also be an interesting project to port our OS to a different architecture after we finish,
-there are many choices other than just x86_64, such as RISC-V or ARM.
-This porting project could teach about what we do for our OS, and what we do differently for architecture.
+It could also be an interesting project to port our OS to a different architecture after we finish. There are many choices other than just x86_64, such as RISC-V or ARM.
+This porting project could teach us about what we do for our OS, and what we do differently for architecture.
 
 
 ## Getting Started: What's First?
@@ -68,7 +113,7 @@ This porting project could teach about what we do for our OS, and what we do dif
 The first step in making an operating system is to either set up or write a bootloader.
 I will be making one; if you wanted to set one up, you could probably set up the kernel you write using GRUB,
 I know some people also use Limine.
-If a bootloader seems complex, don't feel afraid to use an existing one,
+If a bootloader seems complex, don't be afraid to use an existing one;
 writing a **good** bootloader can be just as large a project as writing an operating system.
 To write a bootloader, there will only be 3 steps.
 
@@ -80,11 +125,11 @@ We also need to remember that we are writing assembly without an operating syste
 This means that we can’t use any OS interrupts to print to the screen, read from certain file locations,
 or anything else we would have taken for granted when doing our regular programming.
 
-This is a good decomposition of the problem of writing our own bootloader; even now, you could even stop reading.
+This is a good decomposition of the problem of writing our own bootloader; even now, you could stop reading.
 And Google how to do these steps. It’s good to decompose problems for a massive subject like making your own OS.
 It can help us learn about the individual aspects rather than getting overwhelmed with information when we Google 
 “how to make a bootloader.” Instead, you 
-can google “how to print to BIOS in NASM” and “how to read from a hard disk in BIOS NASM.”
+can Google “how to print to BIOS in NASM” and “how to read from a hard disk in BIOS NASM.”
 
 Even printing is complex without an operating system, so don’t get hung up if you take an hour trying to do any aspect of what
 we’re doing, especially if you’re just sitting there trying to understand some instructions or code 
