@@ -23,15 +23,15 @@ system teaching resources (although I do aim to provide a good one).
 Surprisingly, there are only a couple of things online that aim at getting beginners started on operating system 
 development. 
 I aim to demystify the process of writing your own operating system in this book without it taking up too much of 
-your time. If there are any problems or things that confuse you in any of my articles, please email me
-or message me on any other social media you know I have; 
+your time. If any problems or things confuse you in any of my articles, please create an issue on GitHub (more info
+about this in the [README.md](README.md)).
 I am eager to improve both my technical writing and programming.
 
 Although this series of chapters aims to teach beginners, I recommend making sure you know a bit about how any flavour of 
 assembly works.
-You need to know C too. Alongside this I would also recommend you know basic concepts of computer architecture. 
+You need to know C too. Alongside this, I would also recommend that you know basic concepts of computer architecture. 
 Do you know what a compiler is?
-What about a linker? Or the stack/heap? If so then you're OK to move on.
+What about a linker? Or the stack/heap? If so, then you're OK to move on.
 That’s all the required knowledge you would need to get started.
 Though assembly is not too necessary, I explain assembly **way** more in depth than C, as it requires 
 a lot of familiarity to read naturally.
@@ -101,7 +101,7 @@ reboot a system repeatedly.
 I've seen the sentiment in some places on the internet that goes something like "what? Why would you use 32-bit, 
 just use 64".
 And while this statement would have a lot of merit if we were developing a general-purpose operating system,
-that does not apply to this project. If we were to use 32-bit, the architectural complexity would just 
+that does not apply to this project. If we were to use 64-bit, the architectural complexity would just 
 increase without the main OS features changing.
 Long story short, I think that making a 32-bit OS provides a better learning-to-complexity ratio than 64-bit.
 It could also be an interesting project to port our OS to a different architecture after we finish. There are many choices other than just x86_64, such as RISC-V or ARM.
@@ -140,7 +140,7 @@ In the next chapter, I will cover how to produce the bootloader step by step.
 ## Acknowledgements
 
 Thanks to Mohammed Q. Hussain for writing "A journey in writing an operating system kernel" 
-which I paraphrased from in some places in the initial sections.
+which I paraphrased in some places in the initial sections.
 Thanks to the OSDev wiki; they provide useful resources on writing drivers.
 Thanks to the internet for providing me with great resources that helped me explain and understand 
 some things along my way of writing this.
