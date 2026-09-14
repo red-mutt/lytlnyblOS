@@ -143,7 +143,7 @@ Thanks to Mohammed Q. Hussain for writing "A journey in writing an operating sys
 which I paraphrased in some places in the initial sections.
 Thanks to the OSDev wiki; they provide useful resources on writing drivers.
 Thanks to the internet for providing me with great resources that helped me explain and understand 
-some things along my way of writing this.
+some things along the way of writing this.
 
 
 ## Contributions welcome!
