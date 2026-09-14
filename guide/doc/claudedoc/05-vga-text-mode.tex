@@ -1,0 +1,309 @@
+\part{Seeing what happens: VGA text mode}
+
+\chapter{Video memory}
+
+\begin{goals}
+  \item How the VGA card's text mode works
+  \item What each byte at \hexa{B8000} means
+  \item How to compute the address of any position on screen
+\end{goals}
+
+\section{An 80 by 25 grid}
+
+When the PC boots, the graphics card is in \term{text mode}: it does not display pixels, it
+displays characters. The screen is a grid of 80 columns by 25 rows, that is 2,000 cells.
+
+Each cell is described by \hi{two bytes} in memory:
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\small]
+  \draw[draw=grayborder,fill=accentlight] (0,0) rectangle (3.6,1);
+  \node at (1.8,0.5) {ASCII code};
+  \node[font=\ttfamily\tiny,text=gray] at (1.8,-0.3) {even (low) byte};
+
+  \draw[draw=grayborder,fill=amberlight] (3.6,0) rectangle (7.2,1);
+  \node at (5.4,0.5) {colour attribute};
+  \node[font=\ttfamily\tiny,text=gray] at (5.4,-0.3) {odd (high) byte};
+
+  \draw[decorate,decoration={brace,amplitude=5pt},gray] (0,1.15) -- (7.2,1.15)
+    node[midway,above,font=\sffamily\scriptsize,text=gray] {one screen cell = 16 bits};
+\end{tikzpicture}
+\end{center}
+
+And the attribute byte splits again into two 4-bit halves:
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\small]
+  \draw[draw=grayborder,fill=redlight] (0,0) rectangle (3.0,0.9);
+  \node at (1.5,0.45) {background (4 bits)};
+  \draw[draw=grayborder,fill=greenlight] (3.0,0) rectangle (6.0,0.9);
+  \node at (4.5,0.45) {foreground (4 bits)};
+  \node[font=\ttfamily\tiny,text=gray] at (0.4,-0.3) {bit 7};
+  \node[font=\ttfamily\tiny,text=gray] at (5.6,-0.3) {bit 0};
+\end{tikzpicture}
+\end{center}
+
+Four bits give 16 possible colours, the same ones PCs had in the 1980s:
+
+\begin{center}
+\begin{tabularx}{0.95\textwidth}{@{}llllX@{}}
+\toprule
+\textbf{Value} & \textbf{Colour} & \textbf{Value} & \textbf{Colour} & \\
+\midrule
+0 & Black      & 8  & Dark grey \\
+1 & Blue       & 9  & Light blue \\
+2 & Green      & 10 & Light green \\
+3 & Cyan       & 11 & Light cyan \\
+4 & Red        & 12 & Light red \\
+5 & Magenta    & 13 & Light magenta \\
+6 & Brown      & 14 & Yellow \\
+7 & Light grey & 15 & White \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\filetag{lytlnybl/kernel/drivers/vga\_text.c}
+\begin{lstlisting}[style=c]
+void vga_text_set_color(vga_text* terminal, vga_color f, vga_color b) {
+    terminal->color = ((uint8_t)b << 4) | (uint8_t)f;
+}
+\end{lstlisting}
+
+One line that sums up all of Chapter 2: shift the background four bits left to place it in the high
+half, then combine with OR.
+
+\section{Computing a cell's address}
+
+The 2,000 cells sit in memory one after another, row by row. The cell at row $r$ and column $c$ is
+at index:
+
+\begin{center}
+\cod{index = row $\times$ 80 + column}
+\end{center}
+
+And since each cell occupies 2 bytes, its memory address is \cod{0xB8000 + index $\times$ 2}. In C
+this simplifies a lot by declaring the buffer as a pointer to \cod{uint16\_t}, because pointer
+arithmetic then multiplies by 2 for you:
+
+\filetag{lytlnybl/kernel/drivers/vga\_text.c}
+\begin{lstlisting}[style=c]
+void vga_text_putchar(vga_text* terminal, char c) {
+    uint8_t color = terminal->color;
+    size_t index = terminal->row * terminal->width + terminal->column;
+    uint16_t entry = ((uint16_t)color << 8) | (uint16_t)c;
+    terminal->buffer[index] = entry;
+}
+\end{lstlisting}
+
+Four lines and you have screen output. Compare that with what it would cost on a modern graphics
+system: no driver, no compositor, no fonts. You write two bytes and a letter appears.
+
+\begin{tryit}[Write to the screen by hand]
+This is exactly what the kernel does the moment it enters C, before any driver exists:
+\begin{lstlisting}[style=c]
+volatile char* vga = (volatile char*)0xB8000;
+vga[0] = 'C';    /* character at row 0, column 0 */
+vga[1] = 0x02;   /* attribute: background 0 (black), foreground 2 (green) */
+\end{lstlisting}
+\end{tryit}
+
+\begin{warn}{Why this address works directly}
+\hexa{B8000} lies below 4 MB, and the system maps the first 4 MB with \term{identity}: virtual
+address \hexa{B8000} corresponds to physical \hexa{B8000}. That is why the driver can write there
+without ceremony, even with paging enabled. If the mapping were different, translation would be
+needed. You will see this in Part VIII.
+\end{warn}
+
+% ============================================================
+\chapter{The text driver}
+
+\begin{goals}
+  \item See how a minimal driver is organised around a state structure
+  \item Understand cursor handling and line wrapping
+  \item Spot a latent divide-by-zero and understand why it is so dangerous
+\end{goals}
+
+\section{Terminal state}
+
+A driver needs to remember things between calls: where the cursor is and what colour to write in.
+All of that lives in a structure:
+
+\filetag{lytlnybl/include/kernel/drivers/vga\_text.h}
+\begin{lstlisting}[style=c]
+typedef struct {
+    size_t row;        /* current cursor row */
+    size_t column;     /* current column */
+    size_t width;      /* 80 */
+    size_t height;     /* 25 */
+    uint8_t color;     /* current attribute */
+    uint16_t* buffer;  /* 0xB8000 */
+} vga_text;
+\end{lstlisting}
+
+There is a single global instance, declared in \cod{kernel\_main.c} and used across the kernel with
+\cod{extern}:
+
+\begin{lstlisting}[style=c]
+vga_text terminal;             /* in kernel_main.c */
+extern vga_text terminal;      /* in every other file */
+\end{lstlisting}
+
+\begin{concept}{Passing state explicitly}
+Notice that every function takes \cod{vga\_text* terminal} as its first argument, even though there
+is only one instance. It is a deliberate design decision: it keeps the driver free of hidden state
+and would allow several virtual terminals in future without touching a line of the logic. It is a
+habit worth copying.
+\end{concept}
+
+\section{Initialising and clearing}
+
+\filetag{lytlnybl/kernel/drivers/vga\_text.c}
+\begin{lstlisting}[style=c]
+void vga_text_init(vga_text* terminal) {
+    terminal->row = 0;
+    terminal->column = 0;
+    vga_text_set_color(terminal, VGA_COLOR_WHITE, VGA_COLOR_RED);
+    terminal->width = 80;
+    terminal->height = 25;
+    terminal->buffer = (uint16_t*)0xB8000;
+    vga_text_clear(terminal);
+}
+
+void vga_text_clear(vga_text* terminal) {
+    uint8_t color = terminal->color;
+    uint16_t blank = ((uint16_t)color << 8) | ' ';
+    for (size_t row = 0; row < terminal->height; row++) {
+        for (size_t col = 0; col < terminal->width; col++) {
+            size_t index = row * terminal->width + col;
+            terminal->buffer[index] = blank;
+        }
+    }
+    terminal->row = 0;
+    terminal->column = 0;
+}
+\end{lstlisting}
+
+``Clearing'' the screen means writing 2,000 spaces. There is no ``erase'' command: the hardware
+always shows whatever is in those 4,000 bytes.
+
+\section{Writing a string}
+
+\filetag{lytlnybl/kernel/drivers/vga\_text.c}
+\begin{lstlisting}[style=c]
+void vga_text_write(vga_text* terminal, const char* string) {
+    size_t pos = terminal->row * terminal->width + terminal->column;
+
+    for (size_t i = 0; string[i] != '\0'; i++) {
+        if (string[i] == '\n') {
+            vga_text_writeline(terminal, "");
+            continue;
+        }
+        vga_text_putchar(terminal, string[i]);
+        pos++;
+        terminal->row    = pos / terminal->width;
+        terminal->column = pos % terminal->width;
+        terminal->row    = terminal->row % terminal->height;
+    }
+}
+\end{lstlisting}
+
+The last three lines do all the positioning work with pure arithmetic:
+
+\begin{itemize}
+  \item \cod{pos / 80} gives the row: at position 80 it becomes 1, at 160 it becomes 2\ldots
+  \item \cod{pos \% 80} gives the column within that row.
+  \item \cod{row \% 25} makes row 24 wrap back to row 0.
+\end{itemize}
+
+\begin{warn}{Wrapping is not scrolling}
+That last modulo makes the screen \emph{wrap}: on reaching the bottom it returns to the top and
+writes over what was there. That is not what a real terminal does, which \emph{scrolls} everything
+up by one line. The result is that long output ends up jumbled. Adding real scrolling is an
+excellent exercise: you must move 24 rows with \cod{memcpy} and clear the last one.
+\end{warn}
+
+\section{A divide-by-zero waiting to happen}
+
+Look at those three lines again. There are three divisions, and all three divide by a field of the
+structure: \cod{terminal->width} and \cod{terminal->height}.
+
+\begin{danger}{What happens if \cod{width} or \cod{height} is 0}
+On x86, dividing by zero does not give ``infinity'' or a strange value: it \hi{raises
+exception 0}, \emph{Divide By Zero}. The kernel handles it, and its handler does the most natural
+thing in the world: print an error message.
+
+But printing a message calls \cod{vga\_text\_writeline}, which calls \cod{vga\_text\_write}, which
+divides by zero again. The exception fires again. And again. Each repetition consumes about 150
+bytes of kernel stack, and \hi{never returns}.
+
+After 107 rounds --- $107 \times 156 \approx 16$ KB, exactly the size of the kernel stack ---
+the stack runs off the bottom of mapped memory, a page fault occurs, the
+fault handler tries to use the same broken stack, a double fault occurs, and on the third failure
+the processor gives up and resets the machine. What the user sees is a system that boots, gets to a
+certain point, and reboots in a loop, with no message at all.
+
+This is not hypothetical: Part XIII contains the real processor trace showing those 107 rounds, and
+the step-by-step diagnosis down to the root cause. The cause was not in the video driver: it was
+three subsystems away.
+\end{danger}
+
+\begin{concept}{The underlying lesson}
+A kernel fault rarely shows up where its cause lives. Here, a rounding error in the physical memory
+manager ended up causing a reboot loop in the video driver. Debugging an operating system means
+thinking in \emph{chains} of causes, not about the point where it explodes. Part XIII teaches the
+method.
+\end{concept}
+
+\section{Printing numbers}
+
+There is no \cod{printf} here, so number-to-text conversion is done by hand:
+
+\filetag{lytlnybl/kernel/drivers/vga\_text.c}
+\begin{lstlisting}[style=c]
+void vga_text_write_dec(vga_text* terminal, uint32_t value) {
+    char buffer[10];
+    size_t digits = 0;
+
+    if (value == 0) {
+        vga_text_putchar(terminal, '0');
+        /* ... advance cursor ... */
+        return;
+    }
+
+    while (value > 0) {
+        buffer[digits++] = '0' + (value % 10);  /* least significant digit */
+        value /= 10;
+    }
+    while (digits > 0) {                        /* print in reverse */
+        vga_text_write_char(terminal, buffer[--digits]);
+    }
+}
+\end{lstlisting}
+
+The \cod{'0' + digit} trick works because ASCII digits are consecutive: \cod{'0'} is 48, \cod{'1'}
+is 49, and so on. Adding the numeric value to the code of \cod{'0'} gives the right character.
+
+And it must print in reverse because the algorithm extracts units first, then tens, and so on. Hence
+storing them in an array and walking it backwards.
+
+\begin{recipe}{everything the text driver can do}{ch18-vga-output}
+A replacement \cod{kernel\_main.c} that exercises every function in the driver:
+\cod{write} versus \cod{writeline}, decimal and hexadecimal, all sixteen colours, placing a
+character at an exact cell with \cod{vga\_text\_put\_entry\_at}, and reading it back off the screen
+with \cod{vga\_text\_getchar}.
+
+Watch out for one real bug it exposes: \cod{vga\_text\_write\_dec(t, 0)} writes the \cod{'0'} with
+\cod{putchar} but never advances the cursor, so the next thing printed covers it and the zero
+vanishes. Every other value goes through a loop that does advance it.
+\end{recipe}
+
+
+\exercise{Write \cod{vga\_text\_write\_hex}, printing a \cod{uint32\_t} in hexadecimal with 8
+digits and a \cod{0x} prefix. Hint: instead of \cod{\% 10} use \cod{\& 0xF} and shift 4 bits; to
+turn a 0--15 value into a character you will need to distinguish whether it is below 10.}
+
+\begin{summary}
+With the video driver working, we can see what the system is doing --- which is the single most
+important debugging tool in this environment. Next comes the most important topic in the course:
+interrupts.
+\end{summary}

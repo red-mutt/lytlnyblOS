@@ -1,0 +1,83 @@
+% ============================================================
+%  Operating Systems from Scratch
+%  A complete course built around lytlnyblOS
+% ============================================================
+\documentclass[11pt,openany,oneside]{book}
+
+\input{style}
+
+\begin{document}
+
+% ------------------------------------------------------------
+%  Cover
+% ------------------------------------------------------------
+\begin{titlepage}
+\thispagestyle{empty}
+\begin{tikzpicture}[remember picture,overlay]
+  \fill[ink] (current page.north west) rectangle ([yshift=-12.2cm]current page.north east);
+  \fill[accent] ([yshift=-12.2cm]current page.north west) rectangle ([yshift=-12.55cm]current page.north east);
+
+  \node[anchor=north west,text=white,align=left,
+        font=\sffamily\fontsize{12}{14}\selectfont]
+       at ([shift={(2.6cm,-2.4cm)}]current page.north west)
+       {\color{accent!45!white}A COMPLETE COURSE \ \textbullet\ \ FROM NOTHING TO A WORKING KERNEL};
+
+  \node[anchor=north west,text=white,align=left,
+        font=\sffamily\bfseries\fontsize{40}{46}\selectfont]
+       at ([shift={(2.5cm,-3.5cm)}]current page.north west)
+       {Operating\\Systems\\from Scratch};
+
+  \node[anchor=north west,align=left,text width=13cm,
+        font=\sffamily\fontsize{13}{18}\selectfont,text=white!72!ink]
+       at ([shift={(2.6cm,-9.9cm)}]current page.north west)
+       {Learn how a computer really works by building, step by step,
+        a real 32-bit operating system.};
+
+  \node[anchor=north west,align=left,text width=13.4cm,
+        font=\sffamily\fontsize{10.5}{16}\selectfont,text=gray]
+       at ([shift={(2.6cm,-14.0cm)}]current page.north west)
+       {This course assumes no prior knowledge of computer architecture, assembly language
+        or operating systems. It starts by explaining what a processor is, and ends with an
+        interactive shell running in user space, on top of virtual memory, on top of a
+        filesystem written from scratch.\\[9pt]
+        Everything explained here is implemented in the source code that accompanies this
+        document: the \textbf{lytlnyblOS} project.};
+
+  \node[anchor=south west,align=left,
+        font=\sffamily\fontsize{9.5}{13}\selectfont,text=gray]
+       at ([shift={(2.6cm,2.3cm)}]current page.south west)
+       {Course material derived from the source code and documentation\\
+        of the \texttt{lytlnyblOS} project};
+
+  \draw[accent,line width=2pt] ([shift={(2.6cm,1.9cm)}]current page.south west) -- ++(3.2cm,0);
+\end{tikzpicture}
+\end{titlepage}
+
+\frontmatter
+\pagestyle{fancy}
+
+\input{00-preface}
+
+\tableofcontents
+\cleardoublepage
+
+\mainmatter
+
+\include{01-foundations}
+\include{02-what-is-an-os}
+\include{03-booting}
+\include{04-protected-mode}
+\include{05-vga-text-mode}
+\include{06-interrupts}
+\include{07-drivers}
+\include{08-memory}
+\include{09-processes}
+\include{10-user-space}
+\include{11-storage}
+\include{12-shell}
+\include{13-engineering}
+
+\appendix
+\include{A-appendices}
+
+\end{document}

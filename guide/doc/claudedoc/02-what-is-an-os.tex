@@ -1,0 +1,390 @@
+\part{What an operating system is}
+
+\chapter{The minimum pieces}
+
+\begin{goals}
+  \item Which problems an operating system solves, and which it does not
+  \item The seven pieces without which there is no operating system
+  \item In what order they must be built, and why that order is mandatory
+\end{goals}
+
+\section{The problem it solves}
+
+Imagine you want to run two programs at once on the computer from Chapter 1. With no operating
+system, you have to answer a pile of awkward questions yourself:
+
+\begin{itemize}
+  \item Where does each program load? If both expect to sit at \hexa{400000}, they clobber each
+        other.
+  \item How do they share the processor? There is only one \reg{EIP}.
+  \item If one enters an infinite loop, how do I get control back?
+  \item If one writes to a wrong address, how do I stop it wrecking the other?
+  \item Both want to write to the screen. Who wins?
+  \item Both want to save a file. How do they know which disk sectors are free?
+\end{itemize}
+
+An operating system is exactly the answer to that list. It is not ``the program that starts when
+you power on''; it is \hi{the referee that shares limited hardware between programs that do
+not know each other and do not trust each other}.
+
+\begin{concept}{The three jobs of a kernel}
+Everything a kernel does falls into one of three categories:
+\begin{enumerate}
+  \item \hi{Abstract}: turn ``disk sectors'' into ``files'', ``physical pages'' into ``your
+        own memory'', ``one processor'' into ``every program has its own''.
+  \item \hi{Share}: decide who uses what, and for how long.
+  \item \hi{Protect}: guarantee that one program cannot damage another or the kernel itself.
+\end{enumerate}
+Every technical chapter in this course implements one of the three, for one specific resource.
+\end{concept}
+
+\section{The seven pieces}
+
+A minimal but genuine operating system --- able to run several isolated programs --- needs these
+seven pieces. Not one fewer.
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize,
+  p/.style={draw=accent,fill=accentlight,rounded corners=3pt,minimum width=3.9cm,
+            minimum height=1.15cm,align=center,text=ink}]
+
+  \node[p] (a) {\textbf{1. Boot}\\{\tiny take control of the hardware}};
+  \node[p,below=0.45cm of a] (b) {\textbf{2. Protected mode}\\{\tiny enable privileges and 32 bits}};
+  \node[p,below=0.45cm of b] (c) {\textbf{3. Output}\\{\tiny be able to see what happens}};
+  \node[p,below=0.45cm of c] (d) {\textbf{4. Interrupts}\\{\tiny react to the outside world}};
+
+  \node[p,right=1.6cm of a] (e) {\textbf{5. Memory management}\\{\tiny share and isolate RAM}};
+  \node[p,below=0.45cm of e] (f) {\textbf{6. Processes}\\{\tiny several programs at once}};
+  \node[p,below=0.45cm of f] (g) {\textbf{7. Storage}\\{\tiny files that survive}};
+  \node[draw=green,fill=greenlight,rounded corners=3pt,minimum width=3.9cm,
+        minimum height=1.15cm,align=center,below=0.45cm of g] (h)
+        {\textbf{\color{green}User space}\\{\tiny unprivileged programs}};
+
+  \draw[-{Stealth[length=2.5mm]},accent,thick] (a)--(b);
+  \draw[-{Stealth[length=2.5mm]},accent,thick] (b)--(c);
+  \draw[-{Stealth[length=2.5mm]},accent,thick] (c)--(d);
+  \draw[-{Stealth[length=2.5mm]},accent,thick] (d.east) -- ++(0.4,0) |- (e.west);
+  \draw[-{Stealth[length=2.5mm]},accent,thick] (e)--(f);
+  \draw[-{Stealth[length=2.5mm]},accent,thick] (f)--(g);
+  \draw[-{Stealth[length=2.5mm]},green,thick] (g)--(h);
+\end{tikzpicture}
+\end{center}
+
+Let us walk through them, without yet worrying about implementation.
+
+\subsection{1. Boot: taking control}
+
+Somebody has to go first. The firmware loads 512 bytes from disk and jumps into them; those 512
+bytes have to load the rest. It is a problem of pulling yourself up by your own bootstraps ---
+hence \emph{bootstrapping}, and hence \emph{boot}.
+
+\subsection{2. Protected mode: unlocking the processor}
+
+The processor starts up pretending to be a chip from 1978, for compatibility. It sees only 1 MB of
+memory, works in 16 bits and has no protection at all. It must be switched explicitly. Without
+this, pieces 5 to 7 are literally impossible.
+
+\subsection{3. Output: being able to see what happens}
+
+This looks trivial and is not. Debugging an operating system with no way to print is like fixing
+an engine with your eyes shut. It is the first thing built after you have a working execution
+environment, and the reason is purely practical.
+
+\subsection{4. Interrupts: reacting}
+
+Without interrupts, a program that enters an infinite loop keeps the processor forever. Interrupts
+are the mechanism by which hardware can \emph{take} control away from running code and hand it to
+the kernel. They are the basis of:
+
+\begin{itemize}
+  \item multitasking (the timer interrupts and the kernel switches process),
+  \item devices (the keyboard interrupts when a key is pressed),
+  \item error handling (dividing by zero interrupts),
+  \item system calls (a program interrupts itself to ask for something).
+\end{itemize}
+
+\begin{concept}{Interrupts are the axis}
+If you had to keep one mechanism to understand an operating system, this would be it. Almost
+everything interesting a kernel does happens \emph{inside an interrupt handler}. In lytlnyblOS,
+process switching, keyboard input and every system call all go through one.
+\end{concept}
+
+\subsection{5. Memory management: sharing and isolating}
+
+It comes in three stacked layers:
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Layer} & \textbf{Unit} & \textbf{Answers the question} \\
+\midrule
+Physical memory & 4 KB page & Which chunks of RAM are free? \\
+Virtual memory  & 4 KB page & What does each program see when it looks at an address? \\
+Heap            & bytes     & How do I ask for 17 bytes without wasting a whole page? \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+The middle layer, virtual memory, is the hardest and the most important: it is what makes it
+possible for two programs to use the same address \hexa{400000} without colliding. It gets a
+chapter of its own, explained very slowly.
+
+\subsection{6. Processes: several programs at once}
+
+A \term{process} is a program \emph{in execution} plus all its state: its register values, its
+stack, its memory, its open files. The kernel stores that state in a structure and swaps it dozens
+of times a second, creating the illusion of simultaneity.
+
+\subsection{7. Storage: making things survive}
+
+RAM is erased when you power off. For a file to exist tomorrow, it has to be written to disk; and
+for it to be \emph{findable} tomorrow, the disk needs a structure imposed on it: a
+\term{filesystem}.
+
+\section{Why this order and no other}
+
+The order is not pedagogical: it is a chain of real technical dependencies.
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{To build\ldots} & \textbf{you first need\ldots} \\
+\midrule
+Protected mode       & to have booted and have the code in memory \\
+VGA text mode        & protected mode (to address above 1 MB comfortably) \\
+Interrupts           & protected mode (the interrupt table is different) and output (to see faults) \\
+Timer                & working interrupts and a remapped PIC \\
+Physical memory      & the memory map the bootloader stored \\
+Virtual memory       & the physical manager (to request pages for the tables) \\
+Kernel heap          & virtual memory (to map more pages as it grows) \\
+Processes            & the heap (to allocate structures) and interrupts (to switch) \\
+User space           & processes, virtual memory and a TSS \\
+System calls         & user space and interrupts \\
+Filesystem           & a disk driver \\
+The shell            & absolutely everything above \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\begin{warn}{The cost of skipping a link}
+It is tempting to try loading user programs before paging is properly sorted, or to write the
+filesystem before the heap. You can, but you pay for it: the code fills up with special cases that
+later have to be unpicked. This course follows the order the project is actually built in, and
+that is not a coincidence.
+\end{warn}
+
+% ============================================================
+\chapter{Kernel and user space}
+
+\begin{goals}
+  \item What ``user space'' means exactly
+  \item What a system call is and why it is not an ordinary function call
+  \item What has to happen to cross the boundary in each direction
+\end{goals}
+
+\section{Two worlds}
+
+We saw that the processor has privilege rings. An operating system uses them to split software into
+two worlds with different rules:
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize]
+  \fill[greenlight,draw=green,rounded corners=4pt] (0,2.3) rectangle (11,4.6);
+  \node[text=green,font=\sffamily\bfseries] at (1.75,4.25) {USER SPACE (ring 3)};
+  \node[draw=green,fill=white,rounded corners=2pt,minimum width=2.2cm,minimum height=0.85cm] at (1.8,3.1) {shell};
+  \node[draw=green,fill=white,rounded corners=2pt,minimum width=2.2cm,minimum height=0.85cm] at (4.6,3.1) {user\_test};
+  \node[draw=green,fill=white,rounded corners=2pt,minimum width=2.2cm,minimum height=0.85cm] at (7.4,3.1) {your program};
+  \node[text=gray,font=\sffamily\tiny,align=left] at (9.8,3.1) {each with its\\own private\\memory};
+
+  \fill[redlight,draw=red,rounded corners=4pt] (0,0) rectangle (11,1.75);
+  \node[text=red,font=\sffamily\bfseries] at (1.3,1.42) {KERNEL (ring 0)};
+  \node[draw=red,fill=white,rounded corners=2pt,minimum width=1.9cm,minimum height=0.7cm] at (1.6,0.62) {memory};
+  \node[draw=red,fill=white,rounded corners=2pt,minimum width=1.9cm,minimum height=0.7cm] at (3.9,0.62) {processes};
+  \node[draw=red,fill=white,rounded corners=2pt,minimum width=1.9cm,minimum height=0.7cm] at (6.2,0.62) {files};
+  \node[draw=red,fill=white,rounded corners=2pt,minimum width=1.9cm,minimum height=0.7cm] at (8.5,0.62) {drivers};
+
+  \draw[grayborder,line width=1.5pt,dashed] (0,2.02) -- (11,2.02);
+  \node[fill=white,text=accent,font=\sffamily\bfseries\scriptsize] at (5.5,2.02) {int 0x80 --- the only door};
+\end{tikzpicture}
+\end{center}
+
+The dashed line is the boundary. It is a \emph{real} boundary, enforced by the processor, not a
+convention. A user program cannot call a kernel function even if it knows the address: the page is
+marked supervisor-only and the attempt raises an exception.
+
+\section{The only door}
+
+If a program cannot call the kernel, how does it ask it to print something? Through the one
+mechanism the processor allows: \hi{raising an interrupt on purpose}.
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize,
+  p/.style={draw=grayborder,fill=graylight,rounded corners=2pt,minimum width=5.4cm,minimum height=0.72cm,align=left,inner xsep=8pt}]
+  \node[p,fill=greenlight,draw=green] (a) {1. The program puts the service number in EAX};
+  \node[p,fill=greenlight,draw=green,below=0.28cm of a] (b) {2. It puts arguments in EBX, ECX, EDX};
+  \node[p,fill=greenlight,draw=green,below=0.28cm of b] (c) {3. It executes \texttt{int 0x80}};
+  \node[p,fill=amberlight,draw=amber,below=0.28cm of c] (d) {4. \textbf{The processor switches to ring 0}};
+  \node[p,fill=redlight,draw=red,below=0.28cm of d] (e) {5. It jumps where the IDT says};
+  \node[p,fill=redlight,draw=red,below=0.28cm of e] (f) {6. The kernel reads EAX and does the work};
+  \node[p,fill=redlight,draw=red,below=0.28cm of f] (g) {7. It leaves the result in EAX};
+  \node[p,fill=amberlight,draw=amber,below=0.28cm of g] (h) {8. \texttt{iret}: \textbf{back to ring 3}};
+  \foreach \x/\y in {a/b,b/c,c/d,d/e,e/f,f/g,g/h} \draw[-{Stealth[length=2mm]},gray] (\x)--(\y);
+\end{tikzpicture}
+\end{center}
+
+Steps 4 and 8 are the important ones, and the \emph{hardware} performs them, not software. It is
+the processor that decides to raise privilege, and it only does so by jumping to an address the
+kernel registered in advance. The program does not choose where it lands: it chooses \emph{what it
+asks for}, not \emph{where it goes}.
+
+\begin{concept}{Why this is safe}
+A malicious program cannot ``jump into the kernel at a convenient line'' because the only entry is
+the one the interrupt table defines. The kernel controls the landing point. All the attacker
+controls are the numbers in the registers --- which is why \hi{validating those numbers is
+the single most important thing a system call handler does}. Part XIII shows what happens when
+that validation is missing.
+\end{concept}
+
+\section{The ten services of lytlnyblOS}
+
+Our system offers ten calls. That is a ridiculously small number (Linux has over three hundred)
+but enough for a complete shell.
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}l l l X@{}}
+\toprule
+\textbf{EAX} & \textbf{Name} & \textbf{Arguments} & \textbf{What it does} \\
+\midrule
+\hexa{01} & \cod{exit}    & ---               & Terminates the process and wakes its parent \\
+\hexa{02} & \cod{getpid}  & ---               & Returns the process identifier \\
+\hexa{03} & \cod{yield}   & ---               & Voluntarily gives up the processor \\
+\hexa{04} & \cod{sleep}   & ticks             & Sleeps for $n$ timer ticks \\
+\hexa{05} & \cod{write}   & fd, buffer, n     & Writes to the screen or to a file \\
+\hexa{06} & \cod{read}    & fd, buffer, n     & Reads from the keyboard or from a file \\
+\hexa{07} & \cod{sbrk}    & increment         & Grows the process heap \\
+\hexa{08} & \cod{fsops}   & operation, path   & \cod{ls}, \cod{mkdir}, \cod{touch}, \cod{rm}, \cod{run} \\
+\hexa{09} & \cod{open}    & path              & Opens a file and returns a descriptor \\
+\hexa{0A} & \cod{close}   & fd                & Closes a descriptor \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Notice that \cod{write} serves both the screen and files. That is an idea inherited from Unix:
+\hi{everything is a descriptor}. The program does not know whether 1 is the screen or a
+file; it only knows it is writing to ``descriptor 1''. The kernel decides what that means.
+
+\exercise{Look at the table and work out the minimum set of calls the shell's \cod{cat file.txt}
+command needs, and in what order. (The answer is in Part XII, but try first.)}
+
+% ============================================================
+\chapter{Map of the whole system}
+
+\begin{goals}
+  \item See the complete boot journey end to end
+  \item Know which project file implements each stage
+  \item Have a mental map to come back to whenever you get lost
+\end{goals}
+
+This chapter is the reference to return to whenever you wonder ``where in the system am I?''. You
+do not need to understand it all now; you need to know it exists.
+
+\section{The journey, end to end}
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize,
+  e/.style={draw=accent,fill=accentlight,rounded corners=3pt,minimum width=5.0cm,
+            minimum height=0.85cm,align=center},
+  f/.style={font=\ttfamily\tiny,text=purple,anchor=west}]
+
+  \node[e,fill=graylight,draw=gray] (bios) {Firmware (BIOS): checks the hardware};
+  \node[f] at (5.2,0) {(in ROM, not ours)};
+
+  \node[e,below=0.38cm of bios] (boot) {Boot sector: loads the kernel};
+  \node[f] at (5.2,-1.23) {boot/bootloader.asm};
+
+  \node[e,below=0.38cm of boot] (intro) {Entry: GDT and protected mode};
+  \node[f] at (5.2,-2.46) {kernel/kernel\_intro.asm};
+
+  \node[e,below=0.38cm of intro] (kmain) {\textbf{kernel\_main(): brings up subsystems}};
+  \node[f] at (5.2,-3.69) {kernel/kernel\_main.c};
+
+  \node[e,below=0.38cm of kmain,fill=amberlight,draw=amber] (idt) {idt\_init(): interrupts and PIC};
+  \node[f] at (5.2,-4.92) {kernel/interrupts.c};
+
+  \node[e,below=0.38cm of idt,fill=amberlight,draw=amber] (mem) {init\_pmm/vmm/heap: memory};
+  \node[f] at (5.2,-6.15) {memory/*.c};
+
+  \node[e,below=0.38cm of mem,fill=amberlight,draw=amber] (proc) {init\_procman + init\_tss: processes};
+  \node[f] at (5.2,-7.38) {tasks/procman.c};
+
+  \node[e,below=0.38cm of proc,fill=amberlight,draw=amber] (drv) {timer\_init + keyboard\_init + fs};
+  \node[f] at (5.2,-8.61) {kernel/drivers/, filesystem/};
+
+  \node[e,below=0.38cm of drv,fill=greenlight,draw=green] (load) {load\_program("/bin/shell")};
+  \node[f] at (5.2,-9.84) {tasks/loader.c};
+
+  \node[e,below=0.38cm of load,fill=greenlight,draw=green] (sh) {\textbf{The shell runs in ring 3}};
+  \node[f] at (5.2,-11.07) {user/programs/shell.c};
+
+  \foreach \x/\y in {bios/boot,boot/intro,intro/kmain,kmain/idt,idt/mem,mem/proc,proc/drv,drv/load,load/sh}
+    \draw[-{Stealth[length=2.2mm]},accent,thick] (\x)--(\y);
+\end{tikzpicture}
+\end{center}
+
+\section{What each directory holds}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{Directory} & \textbf{Contents} \\
+\midrule
+\filepath{boot/}        & The boot sector. 512 bytes of 16-bit assembly. \\
+\filepath{kernel/}      & Protected-mode entry, interrupts, utilities and \cod{kernel\_main}. \\
+\filepath{kernel/drivers/} & VGA text mode, PIT timer, PS/2 keyboard and ATA disk. \\
+\filepath{memory/}      & Physical manager (bitmap), virtual manager (paging) and heap. \\
+\filepath{tasks/}       & Processes, context, scheduler and program loader. \\
+\filepath{filesystem/}  & The filesystem in two layers: \cod{fs.c} (low level) and \cod{fs\_manager.c} (descriptors and paths). \\
+\filepath{user/libc/}   & The minimal standard library linked into every user program. \\
+\filepath{user/programs/} & The programs: the shell and a test program. \\
+\filepath{tools/}       & \cod{mkfs.c}: compiled for \emph{your} machine, not for the system. \\
+\filepath{include/}     & All headers, mirroring the structure above. \\
+\filepath{rootfs/}      & The files \cod{mkfs} injects into the disk image. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{What the build produces}
+
+\cod{make} generates a single 10 MB disk image laid out like this:
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize,x=1cm,y=1cm]
+  \def\w{11}
+  \fill[purplelight,draw=purple] (0,0) rectangle (1.3,1.1);
+  \node[align=center,font=\tiny] at (0.65,0.55) {boot\\512 B};
+  \node[font=\ttfamily\tiny,text=gray] at (0.65,-0.32) {sector 0};
+
+  \fill[accentlight,draw=accent] (1.3,0) rectangle (5.2,1.1);
+  \node[align=center,font=\tiny] at (3.25,0.55) {\textbf{kernel.bin}\\$\sim$23 KB (sectors 1--45)};
+  \node[font=\ttfamily\tiny,text=gray] at (1.4,-0.32) {sector 1};
+
+  \fill[graylight,draw=grayborder] (5.2,0) rectangle (6.4,1.1);
+  \node[align=center,font=\tiny] at (5.8,0.55) {free};
+
+  \fill[greenlight,draw=green] (6.4,0) rectangle (\w,1.1);
+  \node[align=center,font=\tiny] at ({(6.4+\w)/2},0.55) {\textbf{filesystem}\\superblock, inodes, data};
+  \node[font=\ttfamily\tiny,text=gray] at (6.5,-0.32) {sector 70};
+\end{tikzpicture}
+\end{center}
+
+\begin{warn}{The 60-sector ceiling}
+The boot sector asks the BIOS for exactly 60 sectors (30,720 bytes). The kernel currently occupies
+around 23 KB, so there is headroom --- but not unlimited. If the kernel exceeded that size, the
+BIOS would load only part of it and the system would fail in a baffling way: no error message,
+just executing garbage. It is a limit worth remembering before adding large code to the kernel.
+\end{warn}
+
+\begin{summary}
+You now know which pieces exist, what each is for, and where its code lives. From here we build, in
+order, starting at the literal beginning: the first 512 bytes.
+\end{summary}

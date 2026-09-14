@@ -1,0 +1,97 @@
+\part{Guided source reference}
+
+\chapter{How to read this reference}
+The pages that follow contain the complete, build-relevant source of lytlnyblOS, organized in the same dependency order used by the tutorial. They are included so that this book can be used away from an editor and so that every explanation can be checked against the actual implementation. This is not filler: a small operating system is learned by repeatedly moving between a subsystem's contract, its code, and its observed behaviour.
+
+Read each group in three passes. First read the header, if one exists; it tells you the names, structures, constants, and promises that other code may use. Second read the implementation from top to bottom, annotating every persistent global variable and every hardware-facing operation. Third use the tutorial chapter named in the group heading to trace one live path through the code. Do not attempt to understand every line on the first pass.
+
+The listings reproduce the files as they are present in this repository when this manual was generated. The operating system source is the subject of the book. Generated binaries, build logs, and the old experimental \pathname{blog_playground/} snapshots are intentionally omitted.
+
+\newcommand{\sourcefile}[2]{\section{\protect\pathname{#1}}\noindent\textit{Study focus:} #2\par\medskip{\small\verbatiminput{#1}}\clearpage}
+
+\chapter{Build contract and boot path}
+Start here when a change does not build or when QEMU never reaches the first C message. The Makefile defines exactly which files become guest code, which program runs on the host, and how disk-image sectors are arranged. The bootloader and linker script then form a strict address agreement.
+
+\sourcefile{../lytlnybl/Makefile}{Follow every target from a source file to the final image. Mark the distinct host compiler and cross compiler paths, and identify every place where a new user program must be registered.}
+\sourcefile{../lytlnybl/boot/bootloader.asm}{Trace DS setup, BIOS text output, E820 collection, CHS disk read, the carry-flag error path, and the final far jump. Count the boot-signature bytes.}
+\sourcefile{../lytlnybl/kernel/linker.ld}{Compare the link address with the bootloader load destination. Notice the order of text, data, and BSS.}
+\sourcefile{../lytlnybl/kernel/kernel_intro.asm}{Read the real-mode prelude and protected-mode transition as separate programs. Identify the GDT descriptors and every selector loaded after the far jump.}
+\sourcefile{../lytlnybl/kernel/kernel_main.c}{This is the initialization dependency graph. For each call, ask what earlier component it assumes and what later component relies on it.}
+
+\chapter{Interrupt architecture and basic kernel services}
+This group defines how the CPU enters the kernel for faults, hardware events, and system calls. Read the C structure and NASM stack pushes together; neither is correct without the other.
+
+\sourcefile{../lytlnybl/include/kernel/interrupts.h}{Use this as the ABI document. Pay special attention to the ordering of \texttt{registers\_t}, PIC constants, vectors, and system-call numbers.}
+\sourcefile{../lytlnybl/kernel/interrupts.asm}{Follow one ISR stub from entry through saved registers, C call, restoration, and \texttt{iret}. Then find the port-I/O helper routines.}
+\sourcefile{../lytlnybl/kernel/interrupts.c}{Trace IDT construction, PIC remapping, exception policy, IRQ dispatch, and the syscall switch statement. Compare every syscall case with its user wrapper.}
+\sourcefile{../lytlnybl/include/kernel/kernel_utils.h}{These are the small freestanding helpers that replace normal library assumptions in kernel code.}
+\sourcefile{../lytlnybl/kernel/kernel_utils.c}{Read implementation details such as byte copying carefully: utilities run in many contexts and mistakes here spread everywhere.}
+\sourcefile{../lytlnybl/include/kernel/mappings.h}{Keep these address constants visible while reading paging, process creation, and the loader. A constant is a design claim that must be confirmed by mappings.}
+
+\chapter{Screen, timer, keyboard, and disk drivers}
+Drivers translate a device-specific protocol into a small kernel interface. For each one, make a table with inputs, persistent state, device ports or memory, interrupt context, and outputs visible to other modules.
+
+\sourcefile{../lytlnybl/include/kernel/drivers/vga_text.h}{Learn the terminal state structure and the color values before reading how characters reach \texttt{0xB8000}.}
+\sourcefile{../lytlnybl/kernel/drivers/vga_text.c}{Trace a string write across line wrapping and scrolling. Check why VGA memory is volatile.}
+\sourcefile{../lytlnybl/include/kernel/drivers/timer.h}{Relate PIT constants to the divisor calculation and tick-based API.}
+\sourcefile{../lytlnybl/kernel/drivers/timer.c}{Follow initialization, IRQ tick handling, sleepers waking, and the hand-off to the scheduler.}
+\sourcefile{../lytlnybl/include/kernel/drivers/keyboard.h}{Treat scan codes and modifier constants as the grammar of this hardware protocol.}
+\sourcefile{../lytlnybl/kernel/drivers/keyboard.c}{Trace one printable key, Backspace, and Enter. Determine exactly when a blocked read becomes ready.}
+\sourcefile{../lytlnybl/include/kernel/drivers/ata.h}{Use these port and status constants while tracing a PIO sector transaction.}
+\sourcefile{../lytlnybl/kernel/drivers/ata.c}{Read one sector read and one sector write as a state machine: select, command, wait, transfer, and report failure.}
+
+\chapter{Physical frames, virtual pages, and the heap}
+Read this group only after completing the slow virtual-memory chapter. Keep a paper address translation beside you. The code is compact, but every pointer has a physical or virtual meaning that matters.
+
+\sourcefile{../lytlnybl/include/memory/pmm.h}{The PMM contract: E820 records enter, aligned frames leave. Identify bitmap ownership.}
+\sourcefile{../lytlnybl/memory/pmm.c}{Trace bitmap initialization from the BIOS memory map. Check every reserved range before trusting allocation.}
+\sourcefile{../lytlnybl/include/memory/vmm.h}{This header names page bits, table shapes, control-register helpers, and the mapping interface.}
+\sourcefile{../lytlnybl/memory/vmm.asm}{These functions are tiny but privileged. Link each C declaration to its exact instruction.}
+\sourcefile{../lytlnybl/memory/vmm.c}{Work through \texttt{init\_vmm} and \texttt{map\_page} with real addresses. Then read the page-fault diagnostic as a decoder of CPU evidence.}
+\sourcefile{../lytlnybl/include/memory/heap.h}{The header describes variable-size blocks living inside pages that VMM has already mapped.}
+\sourcefile{../lytlnybl/memory/heap.c}{Draw the linked blocks after every call to split, expand, free, and merge. Distinguish allocator metadata from payload bytes.}
+
+\chapter{Processes, context, scheduler, and loading}
+This group turns interrupt frames and page directories into separate executions. A useful exercise is to color every field in \texttt{process\_t} according to whether it belongs to identity, scheduling, registers, memory, input, or parent/child control.
+
+\sourcefile{../lytlnybl/include/tasks/procman.h}{This is the process contract. Read the state and type enums before looking at context switching.}
+\sourcefile{../lytlnybl/tasks/procman.asm}{The TSS load is short; understand why its selector is \texttt{0x28} from the GDT layout.}
+\sourcefile{../lytlnybl/tasks/procman.c}{Follow kernel-process and user-process construction separately. For every allocated item, locate its cleanup path.}
+\sourcefile{../lytlnybl/include/tasks/context.h}{Compare its function signatures with the saved interrupt register layout.}
+\sourcefile{../lytlnybl/tasks/context.c}{Trace save, choose, CR3 switch, TSS update, destroy, and restore in order.}
+\sourcefile{../lytlnybl/include/tasks/scheduler.h}{The scheduler interface says when a timer tick becomes a scheduling decision.}
+\sourcefile{../lytlnybl/tasks/scheduler.c}{Simulate a circular ready list on paper. Check each state test in \texttt{get\_next\_process}.}
+\sourcefile{../lytlnybl/include/tasks/loader.h}{The loader exposes a simple promise: a path either yields a process or fails.}
+\sourcefile{../lytlnybl/tasks/loader.c}{Compare the file size, page count, physical frames, virtual code address, and user linker script. Identify the large-file limitation.}
+
+\chapter{Filesystem layout, core, and manager}
+This is a complete small storage stack: PIO sectors at the bottom, fixed blocks, metadata, paths, descriptors, and shell commands at the top. Do not modify layout constants without following their use in both the kernel and host formatter.
+
+\sourcefile{../lytlnybl/include/filesystem/fs_layout.h}{Calculate the size of each packed on-disk structure. Mark superblock, bitmap, inode, and directory-entry fields.}
+\sourcefile{../lytlnybl/include/filesystem/fs.h}{Read this as the low-level filesystem API. Separate allocation, metadata, directory, and file-byte routines.}
+\sourcefile{../lytlnybl/filesystem/fs.c}{Follow formatting first, then block allocation, inode access, directory insertion, and byte-range read/write. At each multi-write operation, consider failure consistency.}
+\sourcefile{../lytlnybl/include/filesystem/fs_manager.h}{This header sits above raw inodes and defines paths, open records, and user-facing operations.}
+\sourcefile{../lytlnybl/filesystem/fs_manager.c}{Trace \texttt{/bin/shell} through path resolution. Then trace a descriptor's offset across open, read/write, and close.}
+\sourcefile{../lytlnybl/tools/mkfs.c}{This host program must produce the exact layout the kernel expects. Compare its layout structures and allocation rules with the kernel filesystem.}
+
+\chapter{User library, binaries, and shell}
+The guest user program has no host C library. It gets a deliberately small library whose functions ultimately cross the \texttt{int 0x80} boundary. Read these files after the syscall dispatcher, not before it.
+
+\sourcefile{../lytlnybl/user/user.ld}{Confirm that this base address is the one the loader maps.}
+\sourcefile{../lytlnybl/include/user/libc/syscalls.h}{Compare every number and operation constant against the kernel interrupt header.}
+\sourcefile{../lytlnybl/user/libc/syscalls.asm}{This is the narrowest possible gateway from normal C calls to the kernel.}
+\sourcefile{../lytlnybl/user/libc/syscalls.c}{Trace arguments and result values for write, read, heap growth, and filesystem calls.}
+\sourcefile{../lytlnybl/include/user/libc/memory.h}{This header describes a second allocator, distinct from the kernel heap.}
+\sourcefile{../lytlnybl/user/libc/memory.c}{Follow \texttt{sbrk} when the user heap grows. Compare its block list with the kernel heap's list.}
+\sourcefile{../lytlnybl/include/user/libc/string.h}{These are the minimal string contracts used by the shell and filesystem-facing code.}
+\sourcefile{../lytlnybl/user/libc/string.c}{Practice tracing null-terminated strings one byte at a time.}
+\sourcefile{../lytlnybl/include/user/libc/chars.h}{This header defines classification helpers used by parsing.}
+\sourcefile{../lytlnybl/user/libc/chars.c}{Check which declared functions exist and which character ranges are recognized.}
+\sourcefile{../lytlnybl/include/user/libc/output.h}{The output API is intentionally smaller than standard C.}
+\sourcefile{../lytlnybl/user/libc/output.c}{Follow \texttt{printf} into \texttt{putchar}, then into \texttt{write} and the syscall boundary.}
+\sourcefile{../lytlnybl/include/user/programs/shell.h}{Read the parser and command declarations before the implementation.}
+\sourcefile{../lytlnybl/user/programs/shell.c}{Trace the REPL from prompt to input, tokens, command selection, syscall, and next prompt. Note the present two-word command restriction.}
+\sourcefile{../lytlnybl/user/programs/test.c}{Use this small program as a template for a new user binary and Makefile rule.}
+
+\chapter{Reference study projects}
+After reading a group, choose one small project and write its interface, address-space assumptions, and test before coding. Suggested projects: print an address-translation trace; add a safe page-table inspector; add a shell help command; give each process its own file descriptor array; add a serial logger; or convert the flat loader into a minimal ELF parser. The tutorial part of this book explains the concepts; this reference part gives you the exact code surface where those concepts become real.

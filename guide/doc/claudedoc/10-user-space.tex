@@ -1,0 +1,708 @@
+\part{User space}
+
+\chapter{The TSS and the way back in}
+
+\begin{goals}
+  \item Why a ring 3 program cannot run on its own stack inside the kernel
+  \item What the TSS is and why only one field of it matters
+  \item How the GDT descriptor for the TSS is filled in from C
+\end{goals}
+
+\section{The problem}
+
+A user process runs in ring 3 with its own stack, somewhere around \hexa{BFFFF000}. Now the timer
+fires. The processor must run kernel code --- but on which stack?
+
+Not the user's. It might be nearly full, it might be corrupt, it might be deliberately pointed at
+kernel memory by a hostile program. If the kernel pushed its data there, a user program could read
+the kernel's saved state, or make the kernel fault by unmapping its own stack.
+
+So the processor \hi{switches stacks automatically} on a privilege change. And it needs to be
+told, in advance, which stack to switch to. That is what the \term{TSS} (Task State Segment) is for.
+
+\begin{analogy}
+The user stack is the visitor's own bag. The kernel will not put its confidential paperwork in a
+visitor's bag --- the visitor could read it, or walk off with it. So at the door there is a
+dedicated locker, and its number is written on a card the receptionist keeps. The TSS is that card;
+\cod{esp0} is the locker number.
+\end{analogy}
+
+\section{One useful field}
+
+The TSS is a large structure --- 104 bytes --- designed in the 80286 era for hardware task
+switching, a feature nobody uses any more because it is slower than doing it in software.
+
+Modern systems, including this one, keep a TSS only because the processor insists on reading two
+fields from it:
+
+\begin{center}
+\begin{tabularx}{0.95\textwidth}{@{}l X@{}}
+\toprule
+\textbf{Field} & \textbf{Purpose} \\
+\midrule
+\cod{ss0} & The stack \emph{segment} to use in ring 0. Always \hexa{10} here \\
+\cod{esp0} & \textbf{The stack pointer to use in ring 0.} Updated on every switch to a user process \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Everything else in the structure is zeroed and ignored.
+
+\filetag{lytlnybl/tasks/procman.c}
+\begin{lstlisting}[style=c]
+void init_tss(void) {
+    uintptr_t base = (uintptr_t)&tss;
+    uint32_t limit = sizeof(tss_t) - 1;
+
+    /* fill in the GDT descriptor that was left blank in assembly */
+    gdt_tss[0] = limit & 0xFF;
+    gdt_tss[1] = (limit >> 8) & 0xFF;
+    gdt_tss[2] = base & 0xFF;
+    gdt_tss[3] = (base >> 8) & 0xFF;
+    gdt_tss[4] = (base >> 16) & 0xFF;
+    gdt_tss[5] = 0x89;              /* present, ring 0, 32-bit available TSS */
+    gdt_tss[6] = (limit >> 16) & 0x0F;
+    gdt_tss[7] = (limit >> 24) & 0xFF;
+
+    memset(&tss, 0, sizeof(tss_t));
+    tss.ss0 = 0x10;                 /* kernel data segment */
+    tss.esp0 = 0;                   /* set properly on each context switch */
+    tss.iomap_base = sizeof(tss_t); /* no I/O permission bitmap */
+
+    load_tss();
+}
+\end{lstlisting}
+
+This is the descriptor from Chapter 16 being filled in by hand, byte by byte, at runtime --- because
+the address of a C variable is not known at assembly time. Access byte \hexa{89} means present, DPL
+0, system segment, type 9 = ``available 32-bit TSS''.
+
+\begin{warn}{\cod{iomap\_base}}
+Setting it to \cod{sizeof(tss\_t)} means ``the I/O permission bitmap starts past the end of this
+structure'', which the processor reads as ``there is no bitmap, deny all port access from ring 3''.
+Leave it at zero and the processor would interpret the start of the TSS itself as a permission
+bitmap, granting user programs direct access to arbitrary hardware ports. A subtle and genuinely
+dangerous mistake.
+\end{warn}
+
+\begin{lstlisting}[style=asm]
+load_tss:
+    mov ax, 0x28        ; the TSS selector
+    ltr ax              ; load task register
+    ret
+\end{lstlisting}
+
+\section{What actually happens on entry}
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize,
+  b/.style={draw=grayborder,rounded corners=3pt,minimum width=3.4cm,minimum height=1.5cm,align=center}]
+
+  \node[b,fill=greenlight,draw=green] (u) at (0,2.4) {\textbf{Ring 3}\\{\tiny ESP = 0xBFFFEF00}\\{\tiny user stack}};
+  \node[b,fill=amberlight,draw=amber] (t) at (5.6,2.4) {\textbf{TSS}\\{\tiny esp0 = 0xC0004000}\\{\tiny ss0 = 0x10}};
+  \node[b,fill=redlight,draw=red] (k) at (2.8,-0.2) {\textbf{Ring 0}\\{\tiny ESP = 0xC0004000}\\{\tiny kernel stack of this process}};
+
+  \draw[-{Stealth[length=2.5mm]},amber,thick] (u) -- node[above,font=\tiny,text=gray]{int 0x80} (t);
+  \draw[-{Stealth[length=2.5mm]},red,thick] (t) -- node[right,font=\tiny,text=gray,align=left]{the CPU reads esp0\\and switches} (k);
+  \draw[-{Stealth[length=2.5mm]},green,thick,dashed] (k) -- node[left,font=\tiny,text=gray]{iret} (u);
+\end{tikzpicture}
+\end{center}
+
+Once on the kernel stack, the processor pushes the user's \reg{SS} and \reg{ESP} there, then
+\reg{EFLAGS}, \reg{CS} and \reg{EIP}. That is why \cod{registers\_t} has those two extra fields at
+the end, and why they only exist when the ring changed.
+
+% ============================================================
+\chapter{Entering ring 3}
+
+\begin{goals}
+  \item How a process is placed in ring 3 without a special instruction
+  \item How a program's address space is built
+  \item How a binary is loaded from disk into memory
+\end{goals}
+
+\section{There is no ``enter user mode'' instruction}
+
+x86 has no instruction that says ``drop to ring 3''. Privilege is lowered only as a side effect of
+returning from an interrupt: \cod{iret} pops \reg{CS}, and if the popped \reg{CS} has RPL 3, the
+processor switches to ring 3, pops \reg{SS} and \reg{ESP} too, and resumes there.
+
+So the trick is to fabricate a context that \emph{looks like} it came from ring 3, and then let the
+normal return path do the work:
+
+\filetag{lytlnybl/tasks/procman.c}
+\begin{lstlisting}[style=c]
+void create_uprocess(process_t* new_process) {
+    new_process->regs.esp = USER_STACK_TOP;      /* 0xBFFFF000 */
+    new_process->regs.cs = 0x18 | 3;             /* user code, RPL 3 */
+    new_process->regs.ds = 0x20 | 3;             /* user data, RPL 3 */
+    new_process->regs.ss = 0x20 | 3;
+    new_process->regs.eflags = 0x202;            /* interrupts enabled */
+    /* ... address space set-up ... */
+}
+\end{lstlisting}
+
+When the scheduler picks this process, \cod{load\_context} copies those values into the
+\cod{registers\_t} on the kernel stack, and \cod{iret} does the rest. \hi{Ring 3 is entered by
+returning to it, from an interrupt that never happened.}
+
+\begin{concept}{Why \reg{EFLAGS} must have \reg{IF} set}
+The user process must run with interrupts enabled, otherwise the timer can never preempt it and a
+single \cod{while(1);} would freeze the machine permanently --- with no way to recover, because
+ring 3 cannot execute \cod{sti} either.
+
+Note this is not a favour the kernel does the program: it is the kernel protecting \emph{itself}.
+\end{concept}
+
+\section{Building the address space}
+
+\begin{lstlisting}[style=c]
+new_process->page_directory = (page_directory_t*)alloc_frame();
+memset((page_directory_t*)new_process->page_directory, 0, 4096);
+
+for (uint32_t i = 0; i < 1024; i++) {
+    (*new_process->page_directory)[i] = (*kernel_directory)[i];
+}
+
+uintptr_t ustack_frame = (uintptr_t)alloc_frame();
+map_page(new_process->page_directory, USER_STACK_TOP - 4096, ustack_frame,
+         PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER);
+
+map_page(new_process->page_directory, USER_HEAP_START,
+         (uintptr_t)alloc_frame(),
+         PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER);
+
+new_process->user_heap_end = USER_HEAP_START + 4096;
+new_process->heap_pages_allocated = 1;
+new_process->ustack = (void*)(USER_STACK_TOP - 4096);
+\end{lstlisting}
+
+One page of stack (4 KB) and one page of heap. Note the stack page is mapped at
+\cod{USER\_STACK\_TOP - 4096}, because \cod{USER\_STACK\_TOP} is the address \emph{above} the last
+usable byte --- the stack grows down from there into the page below.
+
+\begin{danger}{The stack does not grow}
+Exactly one page. If a user program recurses deeply or declares a large local array, \reg{ESP}
+drops below \hexa{BFFFE000} and hits an unmapped page. The page fault handler prints a message and
+the process is killed.
+
+Real systems handle this: a fault just below the stack is recognised as legitimate growth and a new
+page is mapped automatically. Adding that to \cod{page\_fault\_handler} is one of the most
+instructive extensions you can make to this project --- it is perhaps fifteen lines, and it turns a
+crash into a feature.
+\end{danger}
+
+\section{Loading a program from disk}
+
+\filetag{lytlnybl/tasks/loader.c}
+\begin{lstlisting}[style=c]
+process_t* load_program(const char* path) {
+  int32_t fd = fs_open(path);
+  uint32_t inode_num = fs_fd_to_inode(fd);
+
+  fs_inode_t file_inode;
+  if (!fs_read_inode(inode_num, &file_inode))
+    return NULL;
+
+  size_t file_size = file_inode.size;
+
+  uint8_t buffer[file_size];                    /* variable length array */
+  if (fs_read(fd, buffer, file_size) == -1)
+    return NULL;
+
+  process_t* user_proc = create_process((void*)USER_CODE_BASE, PROCESS_USER);
+
+  for (size_t i = 0; i < ((file_size + 4095) / 4096); ++i) {
+    void* code_frame = alloc_frame();
+
+    size_t offset = i * 4096;
+    size_t bytes = file_size - offset;
+    if (bytes > 4096) bytes = 4096;
+    memcpy(code_frame, buffer + offset, bytes);
+
+    map_page(user_proc->page_directory, USER_CODE_BASE + (4096 * i),
+             (uintptr_t)code_frame,
+             PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER);
+  }
+
+  fs_close(fd);
+  return user_proc;
+}
+\end{lstlisting}
+
+The logic is: read the whole file into a buffer, then copy it page by page into freshly allocated
+frames, mapping each one at consecutive virtual addresses starting at \hexa{400000}.
+
+\begin{concept}{Why the copy is needed at all}
+\cod{memcpy(code\_frame, ...)} writes to a \emph{physical} address, which works because the kernel
+identity-maps the low 4 MB. The mapping into the process's address space happens afterwards.
+
+The kernel cannot write directly to \hexa{400000} in the process's space, because that address means
+something else entirely in the kernel's own address space. This two-step dance --- write to the
+frame physically, then map it virtually --- is a pattern you will meet in every kernel.
+\end{concept}
+
+\begin{danger}{Three real problems in this function}
+\textbf{1. \cod{uint8\_t buffer[file\_size]} is a variable-length array on a 16 KB kernel stack.} A
+program larger than about 14 KB overflows it, and Chapter 4 explained what that means. The fix is to
+copy page by page directly from the file, never materialising the whole thing.
+
+\textbf{2. \cod{fs\_open} is not checked.} If the path does not exist it returns $-1$, and the code
+proceeds to call \cod{fs\_fd\_to\_inode(-1)}.
+
+\textbf{3. Code pages are mapped writable.} \cod{PAGE\_WRITABLE} on a code page means a program can
+modify its own instructions. Dropping that flag would be a one-word improvement in safety.
+\end{danger}
+
+\begin{danger}{And the consequence of problem 2, in the shell}
+When the shell runs \cod{run /nonexistent}, \cod{load\_program} returns \cod{NULL}, and the system
+call handler does:
+\begin{lstlisting}[style=c]
+process_t* child = load_program(path);
+child->parent_pid = current_process->pid;   /* NULL dereference */
+\end{lstlisting}
+\cod{parent\_pid} is at offset 4 in the structure, so this writes to address \hexa{4} --- which
+\emph{is} mapped, because the low 4 MB is identity-mapped. No fault occurs. Instead it silently
+corrupts the interrupt vector table area, then reads a garbage pid, sets the shell to
+\cod{BLOCKED} waiting for a child that will never exist, and switches away.
+
+\hi{The observable symptom is that the shell hangs forever with no error message.} Verified on
+a running system: after \cod{run /bin/usertest} (a typo), the prompt never returns and further
+typing echoes but does nothing.
+
+The fix is three lines:
+\begin{lstlisting}[style=c]
+process_t* child = load_program(path);
+if (!child) { regs->eax = -1; break; }
+\end{lstlisting}
+\end{danger}
+
+% ============================================================
+\begin{recipe}{loading a program from the kernel}{ch33-loader}
+Calls \cod{load\_program} twice: once with a path that does not exist, to show it returns
+\cod{NULL} as it should, and once with a real one. It then prints the new process's page directory,
+entry point, stack pointer and code segment before the scheduler has run it even once.
+
+\cod{CS} comes back as \hexa{1B}, which is \hexa{18}\cod{|3}. Nothing else has to happen: the timer
+interrupt reaches the scheduler, the scheduler picks the process, and \cod{iret} drops the CPU into
+ring 3. You can watch the program's output appear a moment later.
+\end{recipe}
+
+% ============================================================
+\chapter{System calls}
+
+\begin{goals}
+  \item Follow a system call from the C library to the kernel and back
+  \item Understand how arguments and return values travel
+  \item Understand why validating user pointers is the most important missing piece
+\end{goals}
+
+\section{The user side}
+
+\filetag{lytlnybl/user/libc/syscalls.asm}
+\begin{lstlisting}[style=asm]
+syscall:
+    mov eax, [esp + 4]   ; service number
+    mov ebx, [esp + 8]   ; first argument
+    mov ecx, [esp + 12]  ; second argument
+    mov edx, [esp + 16]  ; third argument
+
+    int 0x80
+
+    ret                  ; EAX already holds the return value
+\end{lstlisting}
+
+Ten lines that bridge two worlds. C pushes arguments on the stack; this routine moves them into the
+registers the kernel expects, triggers the interrupt, and returns --- with \reg{EAX} untouched since
+the kernel put the result there, which is exactly where C expects a return value.
+
+\filetag{lytlnybl/user/libc/syscalls.c}
+\begin{lstlisting}[style=c]
+int write(int fd, void *buff, size_t count) {
+  return syscall(SYSCALL_WRITE, fd, (uint32_t)buff, count);
+}
+
+int read(int fd, void* buff, size_t count) {
+  return syscall(SYSCALL_READ, fd, (uint32_t)buff, count);
+}
+
+void* sbrk(intptr_t increment) {
+  return (void*)syscall(SYSCALL_SBRK, increment, 0, 0);
+}
+\end{lstlisting}
+
+\section{The kernel side}
+
+\filetag{lytlnybl/kernel/interrupts.asm}
+\begin{lstlisting}[style=asm]
+syscall_entry:
+    push dword 0x80
+    push dword 0
+
+    pusha
+    mov ax, ds
+    push eax
+
+    push esp
+    call syscall_handler
+    add esp, 4
+
+    pop eax
+    popa
+    add esp, 8
+    iret
+\end{lstlisting}
+
+Structurally identical to the ISR stub. The two initial pushes fill the \cod{interrupt\_number} and
+\cod{error\_code} slots so the layout matches \cod{registers\_t}.
+
+\begin{warn}{A small inconsistency}
+The ISR macros push the error code first and the interrupt number second, so the number lands at the
+lower address. Here the order is reversed: \hexa{80} ends up in \cod{error\_code} and 0 in
+\cod{interrupt\_number}.
+
+It is harmless, because \cod{syscall\_handler} reads neither field. But it will confuse anyone
+debugging with a generic dump routine, who will see interrupt number 0 --- ``divide by zero'' --- on
+every system call. Swapping the two pushes would cost nothing and remove a trap.
+\end{warn}
+
+\section{The dispatcher}
+
+\filetag{lytlnybl/kernel/interrupts.c}
+\begin{lstlisting}[style=c]
+void syscall_handler(registers_t* regs) {
+    int fd;
+    uint32_t buffer;
+    size_t count;
+
+    switch (regs->eax) {
+        case SYSCALL_GETPID:
+            regs->eax = current_process->pid;
+            break;
+
+        case SYSCALL_YIELD:
+            context_switch(current_process, get_next_process(), regs);
+            break;
+
+        case SYSCALL_SLEEP:
+            current_process->wake_tick = timer_get_ticks() + regs->ebx;
+            current_process->state = PROCESS_SLEEPING;
+            context_switch(current_process, get_next_process(), regs);
+            break;
+        /* ... */
+    }
+}
+\end{lstlisting}
+
+\cod{regs->eax = current\_process->pid;} deserves a second look. It writes into the saved state on
+the kernel stack; \cod{popa} restores it into the real \reg{EAX}; \cod{iret} returns to ring 3; the
+user's \cod{syscall} routine executes \cod{ret} with the value already in place. The return value
+travels four layers without anyone explicitly returning anything.
+
+\section{\cod{sbrk}: growing the user heap}
+
+\begin{lstlisting}[style=c]
+case SYSCALL_SBRK:
+    current_process->user_heap_end += regs->ebx;
+
+    while (((current_process->user_heap_end + 4096) - USER_HEAP_START) / 4096
+            > current_process->heap_pages_allocated) {
+        map_page(current_process->page_directory,
+            USER_HEAP_START + (current_process->heap_pages_allocated++ * 4096),
+            (uintptr_t)alloc_frame(),
+            PAGE_PRESENT | PAGE_USER | PAGE_WRITABLE);
+    }
+
+    regs->eax = current_process->user_heap_end;
+    break;
+\end{lstlisting}
+
+This is the interface Unix has used since the 1970s: ``move the top of my heap by this much and tell
+me where it now is''. The kernel deals only in pages; the user-space \cod{malloc} in
+\filepath{user/libc/memory.c} turns those pages into byte-sized allocations, using the same
+linked-list design as the kernel heap in Chapter 29.
+
+\begin{warn}{\cod{alloc\_frame} can return NULL}
+If physical memory is exhausted, \cod{map\_page} maps address 0 as a user page. The program then
+gets a heap that silently aliases physical frame 0 --- the interrupt vector table. Checking the
+return value and failing the call cleanly is a small fix with a large payoff.
+\end{warn}
+
+\section{The validation that is missing}
+
+This is the most important section in the chapter.
+
+\begin{lstlisting}[style=c]
+case SYSCALL_WRITE:
+    fd = regs->ebx;
+    buffer = regs->ecx;
+    count = regs->edx;
+
+    if (fd < 1) { regs->eax = -1; break; }
+    if (fd > 2) { regs->eax = fs_write(fd, (void*)buffer, count); break; }
+
+    ((char*) buffer)[count] = '\0';        /* <-- here */
+    vga_text_write(&terminal, (char*)buffer);
+
+    regs->eax = (int)count;
+    break;
+\end{lstlisting}
+
+\begin{danger}{Two distinct problems in one line}
+\textbf{1. It writes one byte past what the caller asked for.} If a program calls
+\cod{write(1, buf, sizeof(buf))} --- which the shell's \cod{cat} command does --- the kernel writes
+a zero one byte beyond the end of \cod{buf}, corrupting whatever follows on the user's stack.
+
+\textbf{2. The pointer is never validated.} \cod{buffer} is a number chosen entirely by the user
+program. Nothing checks that it points into that process's own memory. A program can pass a kernel
+address and the kernel --- running in ring 0, where the \cod{PAGE\_USER} bit does not restrict it
+--- will happily write a zero byte there.
+
+That is a privilege escalation primitive. Not a theoretical one: an arbitrary-address single-byte
+write into kernel memory is enough to corrupt a function pointer or a page table entry.
+\end{danger}
+
+\begin{concept}{What a real kernel does instead}
+Every operating system has a function like \cod{copy\_from\_user} / \cod{copy\_to\_user}. It:
+\begin{enumerate}
+  \item checks that the whole range $[p, p+n)$ lies inside user address space,
+  \item checks the pages are present and have the right permissions,
+  \item copies into a kernel buffer, so the user cannot change the data after validation,
+  \item returns an error rather than faulting if anything is wrong.
+\end{enumerate}
+Adding even a minimal version of this to lytlnyblOS --- ``reject any pointer at or above
+\hexa{C0000000}, and any \cod{count} that would cross out of a mapped page'' --- would close the
+entire class of bug. It is the single highest-value change one could make to this codebase.
+\end{concept}
+
+\section{The full round trip}
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize,
+  r/.style={draw=grayborder,rounded corners=2pt,minimum width=6.6cm,minimum height=0.62cm,align=left,inner xsep=8pt}]
+  \node[r,fill=greenlight,draw=green] (a) {\texttt{printf("hi")} in shell.c};
+  \node[r,fill=greenlight,draw=green,below=0.2cm of a] (b) {\texttt{putchar} $\rightarrow$ \texttt{write(1, \&c, 1)}};
+  \node[r,fill=greenlight,draw=green,below=0.2cm of b] (c) {\texttt{syscall(5, 1, ptr, 1)} in syscalls.c};
+  \node[r,fill=amberlight,draw=amber,below=0.2cm of c] (d) {\texttt{syscall:} load EAX/EBX/ECX/EDX, \texttt{int 0x80}};
+  \node[r,fill=redlight,draw=red,below=0.2cm of d] (e) {CPU: ring 3 $\rightarrow$ 0, stack from TSS, jump via IDT};
+  \node[r,fill=redlight,draw=red,below=0.2cm of e] (f) {\texttt{syscall\_entry:} build registers\_t};
+  \node[r,fill=redlight,draw=red,below=0.2cm of f] (g) {\texttt{syscall\_handler:} case 5 $\rightarrow$ \texttt{vga\_text\_write}};
+  \node[r,fill=redlight,draw=red,below=0.2cm of g] (h) {\texttt{regs->eax = count}};
+  \node[r,fill=amberlight,draw=amber,below=0.2cm of h] (i) {\texttt{popa}, \texttt{iret}: ring 0 $\rightarrow$ 3};
+  \node[r,fill=greenlight,draw=green,below=0.2cm of i] (j) {\texttt{ret} in syscall, EAX is the result};
+  \foreach \x/\y in {a/b,b/c,c/d,d/e,e/f,f/g,g/h,h/i,i/j} \draw[-{Stealth[length=2mm]},gray] (\x)--(\y);
+\end{tikzpicture}
+\end{center}
+
+% ============================================================
+\begin{recipe}{adding a system call, end to end}{ch34-new-syscall}
+The single most useful recipe in the book, because it is the one you will want first. It adds
+\cod{SYSCALL\_UPTIME}, which returns the tick count, and the patch script makes exactly four edits
+--- the four you always have to make:
+
+\begin{enumerate}
+  \item a number in \filepath{include/kernel/interrupts.h},
+  \item a \cod{case} in \cod{syscall\_handler} that writes the result into \cod{regs->eax},
+  \item the same number plus a prototype in \filepath{include/user/libc/syscalls.h},
+  \item the wrapper in \filepath{user/libc/syscalls.c}.
+\end{enumerate}
+
+It ships a user program that calls it, sleeps for 100 ticks and calls it again. Run
+\cod{run /bin/user\_test} at the shell and the difference printed is exactly 100.
+\end{recipe}
+
+% ============================================================
+\chapter{A minimal C library}
+
+\begin{goals}
+  \item What a user program needs before \cod{main} can run
+  \item How \cod{printf} is implemented with variadic arguments
+  \item How user-space \cod{malloc} sits on top of \cod{sbrk}
+\end{goals}
+
+\section{What the library provides}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{File} & \textbf{Contents} \\
+\midrule
+\filepath{user/libc/syscalls.asm} & The \cod{syscall} bridge \\
+\filepath{user/libc/syscalls.c} & One wrapper per system call \\
+\filepath{user/libc/output.c} & \cod{putchar}, \cod{puts}, \cod{print\_num}, \cod{printf} \\
+\filepath{user/libc/memory.c} & \cod{malloc}, \cod{free}, \cod{calloc}, \cod{realloc}, \cod{memcpy}, \cod{memmove}, \cod{memset}, \cod{memcmp} \\
+\filepath{user/libc/string.c} & \cod{strlen}, \cod{strcmp}, \cod{strcpy}\ldots \\
+\filepath{user/libc/chars.c} & \cod{isalpha}, \cod{isdigit}, \cod{isspace}, \cod{tolower}\ldots \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+They are compiled into an archive, \cod{libc.a}, and linked into each program:
+
+\filetag{lytlnybl/Makefile}
+\begin{lstlisting}[style=mk]
+$(USER_LIB): $(USER_LIB_C_OBJECTS) $(USER_LIB_ASM_OBJECTS)
+	$(AR) rcs $@ $^
+
+$(SHELL_ELF): $(BUILD_DIR)/user/programs/shell.o $(USER_LIB)
+	$(LD) -m elf_i386 -T $(USER_LINKER) $^ -o $@
+\end{lstlisting}
+
+An archive is just a bundle of object files; the linker pulls out only the ones actually referenced,
+which keeps the binaries small.
+
+\section{\cod{printf} with variadic arguments}
+
+\filetag{lytlnybl/user/libc/output.c}
+\begin{lstlisting}[style=c]
+void printf(char* format, ...) {
+  va_list args;
+  va_start(args, format);
+
+  while (*format) {
+    if (*format == '%') {
+      format++;
+      if (*format == 'c') {
+        char c = va_arg(args, int);
+        putchar(c);
+      } else if (*format == 's') {
+        char *str = va_arg(args, char*);
+        puts(str);
+      } else if (*format == 'd') {
+        int num = va_arg(args, int);
+        print_num(num);
+      } else if (*format == '%') {
+        putchar('%');
+      } else {
+        putchar('%');
+        putchar(*format);
+      }
+    } else {
+      putchar(*format);
+    }
+    format++;
+  }
+  va_end(args);
+}
+\end{lstlisting}
+
+\begin{concept}{How variadic arguments work}
+Because 32-bit x86 pushes arguments on the stack right to left, the arguments after \cod{format} sit
+immediately above it in memory, contiguously. \cod{va\_start} points at that spot and \cod{va\_arg}
+reads one and advances.
+
+This also explains why \cod{printf} is fundamentally unsafe: the function has no way to know how
+many arguments were actually passed. \cod{printf("\%d \%d", 1)} reads a second integer from whatever
+happens to be on the stack. Nothing detects it.
+\end{concept}
+
+\begin{warn}{\cod{putchar} writes one byte at a time}
+\cod{putchar} calls \cod{write(1, \&c, 1)}, which is a full system call --- an interrupt, a
+privilege switch, a dispatch --- \emph{per character}. Printing a 40-character line means 40 system
+calls.
+
+Real libraries buffer: accumulate into an array and flush on newline or when full. Adding buffering
+here would be a large speed-up and a small change. It would also interact with the write-past-the-end
+bug from the previous chapter, so fix that first.
+\end{warn}
+
+\section{\cod{malloc} on top of \cod{sbrk}}
+
+\filetag{lytlnybl/user/libc/memory.c}
+\begin{lstlisting}[style=c]
+void *malloc(size_t bytes) {
+  if (bytes == 0) return NULL;
+  if (!heap_start_head) init_heap();
+
+  heap_header_t* block = find_free_block(bytes);
+  if (block) {
+    if (block->size != bytes) split_block(block, bytes);
+    block->free = false;
+    return (void*)((uintptr_t)block + sizeof(heap_header_t));
+  } else {
+    expand_heap(bytes);
+    return malloc(bytes);
+  }
+}
+
+void expand_heap(size_t requested_size) {
+  uintptr_t original_end = heap_end;
+  heap_end = (uintptr_t)sbrk(requested_size);
+  /* ... append a new free block ... */
+}
+\end{lstlisting}
+
+This is the same design as the kernel heap --- headers, a singly linked list, split and merge --- but
+one layer up: where the kernel heap called \cod{map\_page}, this calls \cod{sbrk}.
+
+\begin{concept}{The same pattern at every level}
+Notice the recurring shape. The physical manager hands out 4 KB frames. The virtual manager turns
+frames into mapped pages. The kernel heap turns pages into bytes. \cod{sbrk} turns kernel pages into
+user pages. User \cod{malloc} turns those into bytes.
+
+Five layers, each doing one job and asking the layer below for coarser units. That is what
+``building an operating system'' looks like in practice: not one clever mechanism, but a stack of
+simple ones that each hide the mess of the one beneath.
+\end{concept}
+
+\begin{recipe}{a user program template}{ch35-libc}
+Everything a program in this system can do, in one commented file: \cod{printf} with all its
+conversions, \cod{malloc} / \cod{calloc} / \cod{realloc} / \cod{free}, the string functions, and
+\cod{get\_pid}, \cod{sleep}, \cod{yield} and \cod{exit}.
+
+Start from it when writing your own. Note it calls its entry point \cod{\_start}, which is what
+\filepath{user.ld} actually names --- unlike the shell, for the reason the next section
+explains.
+\end{recipe}
+
+\section{The entry point problem}
+
+\filetag{lytlnybl/user/user.ld}
+\begin{lstlisting}[style=txt]
+ENTRY(_start)
+
+SECTIONS
+{
+    . = 0x00400000;
+    .text   : { *(.text) }
+    .rodata : { *(.rodata) }
+    .data   : { *(.data) }
+    .bss    : { *(.bss) }
+}
+\end{lstlisting}
+
+The kernel always jumps to \hexa{400000} when starting a user process, so \emph{whatever code sits
+at that address} is the entry point.
+
+\begin{danger}{The entry point works by accident}
+The linker script declares \cod{ENTRY(\_start)}, and \filepath{user/programs/test.c} does define
+\cod{\_start}. But \filepath{user/programs/shell.c} defines \cod{start} --- without the
+underscore.
+
+Link the shell and the linker warns:
+\begin{lstlisting}[style=txt]
+ld: warning: cannot find entry symbol _start; defaulting to 00400000
+\end{lstlisting}
+It then works anyway, for one reason only: the Makefile lists \cod{shell.o} first, so its
+\cod{.text} lands first, and \cod{start()} happens to be the first function in the file.
+
+Add a function above \cod{start()}, or reorder the link line, and the kernel will jump into the
+wrong function with no diagnostic at all. The fix is trivial --- rename it to \cod{\_start}, or
+better, write a tiny \cod{crt0.o} that is always linked first and calls \cod{main} --- but until
+then this is a loaded gun.
+\end{danger}
+
+\begin{tryit}
+Check it for yourself:
+\begin{lstlisting}[style=sh]
+i686-elf-nm -n build/shell.elf | head -3
+\end{lstlisting}
+You should see \cod{U \_start} (undefined) and \cod{00400000 T start}. The address is right; the
+symbol name is not.
+\end{tryit}
+
+\begin{summary}
+User space works: programs run unprivileged, in their own address space, and can ask the kernel for
+services through a single controlled door. What is left is giving them something to work with ---
+persistent storage --- and a program to drive it all.
+\end{summary}

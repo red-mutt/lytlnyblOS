@@ -1,0 +1,136 @@
+\chapter*{How to use this course}
+\addcontentsline{toc}{chapter}{How to use this course}
+\markboth{How to use this course}{How to use this course}
+
+\section*{Who this is for}
+
+This course is written for someone who knows \hi{nothing} about operating systems. Nothing
+about assembly language. Nothing about how a computer starts up. If you can write a C program
+that prints \cod{"Hello"}, you have enough to begin. If you have also met a pointer without
+running away, even better.
+
+What it does ask of you is a particular kind of patience. An operating system is a machine of
+interlocking parts: almost none of them makes complete sense until you have seen the next one.
+There will be moments where you read ``we will cover this in Chapter 24'' and have to accept it.
+That is normal, and it is deliberate --- trying to explain everything at once is precisely why
+most people give up.
+
+\section*{What you are going to build}
+
+The system studied here is called \hi{lytlnyblOS}. It is deliberately small: around 5,500
+lines of C and assembly. But it is \emph{complete} in the way that matters. It boots from nothing
+on a virtual machine, takes control of the processor, manages memory, runs several programs at
+once, isolates them from each other, reads and writes a disk through its own filesystem, and
+leaves you at a command line where you can type \cod{ls /bin} and get an answer.
+
+None of that comes for free. There is no library underneath. There is no Linux underneath. When
+the system prints a letter on screen, it is because someone wrote a byte to memory address
+\hexa{B8000}. When it reads a key, it is because someone programmed the interrupt controller to
+raise a signal. That ``someone'' is going to be you, and understanding exactly why each piece sits
+where it does is the point of this document.
+
+\begin{concept}{The journey in one sentence}
+You will go from ``the computer powers on and knows how to do nothing'' to ``an unprivileged user
+program asks the kernel to print text for it, and the kernel obliges'' --- understanding every
+step in between.
+\end{concept}
+
+\section*{How this is organised}
+
+The course has thirteen parts plus appendices. The order is \hi{not negotiable}: each part
+builds on the previous one, exactly as the operating system itself does.
+
+\begin{itemize}
+  \item \hi{Parts I and II} are groundwork: what a processor is, what memory is, what an
+        operating system actually is and which minimum pieces it needs. There is no project code
+        yet, but nothing later stands up without this.
+  \item \hi{Parts III to VII} build a minimal kernel: boot, enter protected mode, print to
+        screen, handle interrupts, and talk to the timer and keyboard. By the end of Part VII you
+        have a system that reacts to the outside world.
+  \item \hi{Parts VIII and IX} are the heart of it: memory management and processes. This is
+        where ``a program that runs'' becomes ``an operating system''.
+  \item \hi{Parts X to XII} open the system up: user space, system calls, disk, filesystem
+        and the shell.
+  \item \hi{Part XIII} is real engineering: how it all compiles, how to debug it, and a
+        complete worked case study of diagnosing a real fault in this project.
+\end{itemize}
+
+\section*{The boxes}
+
+Five kinds of box appear throughout the text. It is worth knowing what each colour means.
+
+\begin{concept}{Concept}
+Blue. A central idea you will reuse many times. If you could only keep one thing from the page,
+this is it.
+\end{concept}
+
+\begin{analogy}
+Purple. A comparison with something from everyday life. Useful for building intuition, but
+\emph{every analogy lies a little}: when intuition and code disagree, the code wins.
+\end{analogy}
+
+\begin{warn}{Watch out}
+Amber. A classic mistake, a subtle trap, or something that costs hours of debugging in practice.
+\end{warn}
+
+\begin{danger}{This breaks the system}
+Red. Serious faults: memory corruption, reboot loops, the kind of thing that does not produce an
+error message but simply makes nothing work.
+\end{danger}
+
+\begin{tryit}
+Green. Something you can run or look at right now to confirm that what you just read is true. Use
+them: reading about operating systems without verifying anything is the best way to believe you
+have understood something you have not.
+\end{tryit}
+
+\section*{What you need installed}
+
+All development happens on Linux (on Windows, through WSL). You need five tools:
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Tool} & \textbf{Purpose} & \textbf{Why that one} \\
+\midrule
+\cod{nasm} & Assembler & Intel syntax, produces flat binaries with no header \\
+\cod{i686-elf-gcc} & C compiler & A \emph{cross} compiler: generates code for a machine with no operating system \\
+\cod{ld} & Linker & Places each chunk of code at the exact address we want \\
+\cod{qemu-system-i386} & Emulator & Emulates a whole PC; if the system hangs, you close a window \\
+\cod{gdb} & Debugger & Lets you stop the emulated processor and inspect its registers \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+The delicate one is the cross compiler. Your system's \cod{gcc} produces programs for \emph{your}
+Linux: they expect a standard library, a dynamic loader, and a kernel to provide services. Our
+operating system has none of that, because it \emph{is} the thing that would provide it. Hence a
+\cod{gcc} configured for the \cod{i686-elf} target: ``32-bit x86 processor, ELF format, no
+operating system behind it''. Part III explains this in detail.
+
+\begin{tryit}[Check your environment]
+\begin{lstlisting}[style=sh]
+nasm -v
+i686-elf-gcc --version
+qemu-system-i386 --version
+make --version
+gdb --version
+\end{lstlisting}
+If all five answer, you can run \cod{make run} inside \filepath{lytlnybl/} and watch the system
+boot.
+\end{tryit}
+
+\section*{An honest warning about the code}
+
+This course explains a \emph{teaching} operating system. That means some decisions were made so
+the code reads clearly, not so it is robust. At several points you will find red boxes pointing
+at real limitations of the project: missing validation, memory that is never freed, edge cases
+that hang the machine.
+
+That is not a flaw in the course --- \hi{it is part of the course}. Learning where a real
+operating system would have to be more careful is as valuable as learning how it behaves when
+everything goes right. Part XIII collects all of those points and explains how each would be
+fixed.
+
+\sectionbreak
+Let us start at the real beginning: what a computer is.

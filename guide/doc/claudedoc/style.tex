@@ -1,0 +1,284 @@
+% ============================================================
+%  estilo.tex — preámbulo y diseño del curso
+% ============================================================
+
+\usepackage[a4paper,top=26mm,bottom=26mm,inner=28mm,outer=22mm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+\usepackage{lmodern}
+\usepackage{textcomp}
+\usepackage{microtype}
+% disable <<, >>, -- ligatures in monospaced fonts
+\DisableLigatures[<,>,']{encoding = T1, family = tt*}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{tikz}
+\usepackage[framemethod=TikZ]{mdframed}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage{needspace}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage[hidelinks,bookmarks=true,bookmarksnumbered=true]{hyperref}
+
+\usetikzlibrary{shapes.geometric,arrows.meta,positioning,calc,fit,backgrounds,decorations.pathreplacing}
+
+% ------------------------------------------------------------
+%  Paleta
+% ------------------------------------------------------------
+\definecolor{ink}{HTML}{16202C}
+\definecolor{accent}{HTML}{1F5FA9}
+\definecolor{accentlight}{HTML}{E8F0FA}
+\definecolor{green}{HTML}{1E7A4B}
+\definecolor{greenlight}{HTML}{E6F4EC}
+\definecolor{amber}{HTML}{A86A00}
+\definecolor{amberlight}{HTML}{FDF3E0}
+\definecolor{red}{HTML}{A32B2B}
+\definecolor{redlight}{HTML}{FBEBEB}
+\definecolor{purple}{HTML}{5B3C88}
+\definecolor{purplelight}{HTML}{F1ECF8}
+\definecolor{gray}{HTML}{5C6773}
+\definecolor{graylight}{HTML}{F2F4F6}
+\definecolor{grayborder}{HTML}{D3D9E0}
+\definecolor{teal}{HTML}{0F6E70}
+\definecolor{teallight}{HTML}{E4F2F2}
+
+\color{ink}
+
+% ------------------------------------------------------------
+%  Encabezados y pies
+% ------------------------------------------------------------
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+\fancyhead[LE]{\footnotesize\color{gray}\nouppercase{\leftmark}}
+\fancyhead[RO]{\footnotesize\color{gray}\nouppercase{\rightmark}}
+\fancyfoot[LE,RO]{\small\color{accent}\bfseries\thepage}
+\fancyfoot[RE,LO]{\footnotesize\color{gray}Operating Systems from Scratch}
+
+\fancypagestyle{plain}{%
+  \fancyhf{}%
+  \renewcommand{\headrulewidth}{0pt}%
+  \fancyfoot[LE,RO]{\small\color{accent}\bfseries\thepage}%
+  \fancyfoot[RE,LO]{\footnotesize\color{gray}Operating Systems from Scratch}%
+}
+
+\renewcommand{\chaptermark}[1]{\markboth{\thechapter.\ #1}{}}
+\renewcommand{\sectionmark}[1]{\markright{\thesection.\ #1}}
+
+% ------------------------------------------------------------
+%  Títulos
+% ------------------------------------------------------------
+\titleformat{\part}[display]
+  {\normalfont\sffamily\huge\bfseries\color{accent}\filcenter}
+  {\vspace*{2cm}\normalsize\mdseries\color{gray}PART \thepart}
+  {14pt}
+  {\Huge\color{ink}}
+  [\vspace{6pt}{\color{accent}\rule{0.45\textwidth}{1.2pt}}]
+
+\titleformat{\chapter}[display]
+  {\normalfont\sffamily\bfseries}
+  {\raggedright\normalsize\color{accent}CHAPTER \thechapter}
+  {6pt}
+  {\raggedright\LARGE\color{ink}}
+  [\vspace{4pt}{\color{accent}\rule{\textwidth}{1pt}}]
+\titlespacing*{\chapter}{0pt}{6pt}{26pt}
+
+\titleformat{\section}
+  {\normalfont\sffamily\large\bfseries\color{accent}}{\thesection}{0.7em}{}
+\titleformat{\subsection}
+  {\normalfont\sffamily\normalsize\bfseries\color{ink}}{\thesubsection}{0.7em}{}
+\titleformat{\subsubsection}
+  {\normalfont\sffamily\small\bfseries\color{gray}}{}{0em}{}
+
+\setcounter{tocdepth}{1}
+\setcounter{secnumdepth}{2}
+
+% ------------------------------------------------------------
+%  Listas
+% ------------------------------------------------------------
+\setlist[itemize]{leftmargin=1.5em,itemsep=2pt,topsep=4pt}
+\setlist[enumerate]{leftmargin=1.8em,itemsep=2pt,topsep=4pt}
+\setlist[description]{leftmargin=1.2em,style=nextline,font=\bfseries\color{accent}}
+
+% ------------------------------------------------------------
+%  Código
+% ------------------------------------------------------------
+\lstdefinestyle{base}{
+  basicstyle=\ttfamily\footnotesize\color{ink},
+  keywordstyle=\color{accent}\bfseries,
+  commentstyle=\color{green}\itshape,
+  stringstyle=\color{red},
+  numberstyle=\ttfamily\tiny\color{gray},
+  numbers=left,
+  numbersep=9pt,
+  showstringspaces=false,
+  breaklines=true,
+  breakatwhitespace=false,
+  breakindent=1.2em,
+  tabsize=2,
+  columns=fullflexible,
+  keepspaces=true,
+  frame=leftline,
+  framerule=2pt,
+  rulecolor=\color{grayborder},
+  backgroundcolor=\color{graylight},
+  framexleftmargin=6pt,
+  framexrightmargin=2pt,
+  framextopmargin=4pt,
+  framexbottommargin=4pt,
+  xleftmargin=10pt,
+  aboveskip=10pt,
+  belowskip=10pt,
+  literate=%
+    {á}{{\'a}}1 {é}{{\'e}}1 {í}{{\'i}}1 {ó}{{\'o}}1 {ú}{{\'u}}1
+    {Á}{{\'A}}1 {É}{{\'E}}1 {Í}{{\'I}}1 {Ó}{{\'O}}1 {Ú}{{\'U}}1
+    {ñ}{{\~n}}1 {Ñ}{{\~N}}1 {ü}{{\"u}}1 {¿}{{?`}}1 {¡}{{!`}}1
+}
+
+\lstdefinelanguage{nasm}{
+  morekeywords={mov,movzx,movsx,add,sub,mul,imul,div,idiv,inc,dec,and,or,xor,not,neg,
+    shl,shr,sal,sar,cmp,test,jmp,je,jne,jz,jnz,jc,jnc,ja,jae,jb,jbe,jg,jge,jl,jle,
+    call,ret,iret,iretd,push,pop,pusha,popa,pushad,popad,pushfd,popfd,lea,nop,hlt,cli,sti,
+    in,out,inb,outb,lgdt,lidt,ltr,invlpg,int,lodsb,stosb,rep,times,db,dw,dd,dq,equ,resb,resw,resd,
+    global,extern,section,bits,org,section},
+  morekeywords=[2]{eax,ebx,ecx,edx,esi,edi,ebp,esp,ax,bx,cx,dx,si,di,bp,sp,
+    al,bl,cl,dl,ah,bh,ch,dh,cs,ds,es,fs,gs,ss,cr0,cr2,cr3,cr4,eflags},
+  sensitive=false,
+  morecomment=[l]{;},
+  morestring=[b]",
+  morestring=[b]'
+}
+
+\lstdefinestyle{c}{style=base,language=C,
+  morekeywords={uint8_t,uint16_t,uint32_t,uint64_t,int8_t,int16_t,int32_t,int64_t,
+    size_t,uintptr_t,intptr_t,bool,true,false,NULL,inline,asm,volatile,restrict}}
+\lstdefinestyle{asm}{style=base,language=nasm,
+  keywordstyle=\color{accent}\bfseries,
+  keywordstyle=[2]\color{purple}}
+\lstdefinestyle{sh}{style=base,language=bash,numbers=none,
+  backgroundcolor=\color{ink!5},keywordstyle=\color{purple}\bfseries}
+\lstdefinestyle{mk}{style=base,language=make,numbers=none}
+\lstdefinestyle{txt}{style=base,numbers=none,keywordstyle=\color{ink},
+  backgroundcolor=\color{white},frame=none,xleftmargin=10pt}
+
+\lstset{style=c}
+
+\newcommand{\filepath}[1]{\texttt{\small\color{purple}\detokenize{#1}}}
+
+% Cabecera de filetag encima de un bloque de código
+\newcommand{\filetag}[1]{%
+  \needspace{4\baselineskip}%
+  \vspace{8pt}\noindent
+  \begin{tikzpicture}
+    \node[anchor=west,inner xsep=7pt,inner ysep=3pt,fill=accent,text=white,
+          font=\ttfamily\scriptsize,rounded corners=1.5pt] {\detokenize{#1}};
+  \end{tikzpicture}\par\nobreak\vspace{-8pt}}
+
+% ------------------------------------------------------------
+%  Cajas
+% ------------------------------------------------------------
+\newcommand{\boxtitle}[2]{{\sffamily\bfseries\color{#1}#2}\par\vspace{2pt}}
+
+\newmdenv[
+  linecolor=accent,backgroundcolor=accentlight,linewidth=0pt,
+  leftline=true,rightline=false,topline=false,bottomline=false,
+  innerleftmargin=10pt,innerrightmargin=10pt,innertopmargin=8pt,innerbottommargin=8pt,
+  skipabove=10pt,skipbelow=10pt,leftmargin=0pt,rightmargin=0pt,
+  linewidth=3pt
+]{boxconcept}
+
+\newmdenv[
+  linecolor=amber,backgroundcolor=amberlight,linewidth=3pt,
+  leftline=true,rightline=false,topline=false,bottomline=false,
+  innerleftmargin=10pt,innerrightmargin=10pt,innertopmargin=8pt,innerbottommargin=8pt,
+  skipabove=10pt,skipbelow=10pt
+]{boxwarn}
+
+\newmdenv[
+  linecolor=green,backgroundcolor=greenlight,linewidth=3pt,
+  leftline=true,rightline=false,topline=false,bottomline=false,
+  innerleftmargin=10pt,innerrightmargin=10pt,innertopmargin=8pt,innerbottommargin=8pt,
+  skipabove=10pt,skipbelow=10pt
+]{boxcheck}
+
+\newmdenv[
+  linecolor=purple,backgroundcolor=purplelight,linewidth=3pt,
+  leftline=true,rightline=false,topline=false,bottomline=false,
+  innerleftmargin=10pt,innerrightmargin=10pt,innertopmargin=8pt,innerbottommargin=8pt,
+  skipabove=10pt,skipbelow=10pt
+]{boxanalogy}
+
+\newmdenv[
+  linecolor=red,backgroundcolor=redlight,linewidth=3pt,
+  leftline=true,rightline=false,topline=false,bottomline=false,
+  innerleftmargin=10pt,innerrightmargin=10pt,innertopmargin=8pt,innerbottommargin=8pt,
+  skipabove=10pt,skipbelow=10pt
+]{boxdanger}
+
+\newmdenv[
+  linecolor=teal,backgroundcolor=teallight,linewidth=3pt,
+  leftline=true,rightline=false,topline=false,bottomline=false,
+  innerleftmargin=10pt,innerrightmargin=10pt,innertopmargin=8pt,innerbottommargin=8pt,
+  skipabove=10pt,skipbelow=10pt
+]{boxrecipe}
+
+\newmdenv[
+  linecolor=grayborder,backgroundcolor=graylight,linewidth=0.8pt,
+  roundcorner=3pt,
+  innerleftmargin=10pt,innerrightmargin=10pt,innertopmargin=8pt,innerbottommargin=8pt,
+  skipabove=10pt,skipbelow=10pt
+]{boxplain}
+
+\newenvironment{concept}[1]{\begin{boxconcept}\boxtitle{accent}{#1}}{\end{boxconcept}}
+\newenvironment{warn}[1]{\begin{boxwarn}\boxtitle{amber}{#1}}{\end{boxwarn}}
+\newenvironment{tryit}[1][Try it yourself]{\begin{boxcheck}\boxtitle{green}{#1}}{\end{boxcheck}}
+\newenvironment{analogy}[1][An analogy]{\begin{boxanalogy}\boxtitle{purple}{#1}}{\end{boxanalogy}}
+\newenvironment{danger}[1]{\begin{boxdanger}\boxtitle{red}{#1}}{\end{boxdanger}}
+% Runnable recipe: #1 = the task, #2 = folder under examples/
+\newenvironment{recipe}[2]{%
+  \begin{boxrecipe}%
+  {\sffamily\bfseries\color{teal}In practice: #1}\par
+  {\ttfamily\scriptsize\color{gray}examples/#2/\quad---\quad make run}\par\vspace{5pt}}
+  {\end{boxrecipe}}
+
+\newenvironment{summary}[1][In short]{\begin{boxplain}\boxtitle{gray}{#1}}{\end{boxplain}}
+
+% Bloque de "goals" al inicio de cada capítulo
+\newenvironment{goals}{%
+  \begin{boxplain}\boxtitle{accent}{By the end of this chapter you will know}%
+  \begin{itemize}[leftmargin=1.3em,itemsep=1pt,topsep=0pt]}
+  {\end{itemize}\end{boxplain}\vspace{4pt}}
+
+% Ejercicios
+\newcounter{exercise}[chapter]
+\newcommand{\exercise}[1]{%
+  \refstepcounter{exercise}%
+  \medskip\noindent{\sffamily\bfseries\color{accent}Exercise \thechapter.\theexercise.}\ #1\par\medskip}
+
+% Atajos tipográficos
+\newcommand{\hi}[1]{\textbf{\color{accent}#1}}
+\newcommand{\term}[1]{\textbf{#1}}
+\newcommand{\reg}[1]{\texttt{\color{purple}#1}}
+\newcommand{\hexa}[1]{\texttt{0x#1}}
+\newcommand{\cod}[1]{\texttt{\small #1}}
+
+% Decorative section break
+\newcommand{\sectionbreak}{\par\vspace{6pt}\centerline{\color{grayborder}\rule{0.3\textwidth}{0.6pt}}\vspace{6pt}\par}
+
+\setlength{\parskip}{0.45em}
+\setlength{\parindent}{0pt}
+\linespread{1.06}
+
+\setlength{\emergencystretch}{2.5em}
+\sloppy
+
+\raggedbottom

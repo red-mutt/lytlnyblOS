@@ -1,0 +1,661 @@
+\part{Storage and the filesystem}
+
+\chapter{Talking to the disk}
+
+\begin{goals}
+  \item What LBA addressing is and why it replaced CHS
+  \item How ATA PIO transfers a sector
+  \item Why the status register must be polled, and in what order
+\end{goals}
+
+\section{LBA: one number instead of three}
+
+Chapter 13 used CHS, because that is what the BIOS offers in real mode. Once in protected mode we
+talk to the disk controller directly, and we can use \term{LBA} (Logical Block Addressing): sectors
+are numbered $0, 1, 2, \ldots$ and that is the whole model. No geometry, no off-by-one on sector
+numbers, no track boundaries.
+
+28-bit LBA addresses up to $2^{28}$ sectors, which is 128 GB. More than enough.
+
+\section{The registers}
+
+The ATA controller is a set of I/O ports:
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Port} & \textbf{Name} & \textbf{Purpose} \\
+\midrule
+\hexa{1F0} & DATA & 16-bit data transfer window \\
+\hexa{1F2} & SECTOR\_COUNT & How many sectors to transfer \\
+\hexa{1F3} & LBA\_LOW & LBA bits 7--0 \\
+\hexa{1F4} & LBA\_MID & LBA bits 15--8 \\
+\hexa{1F5} & LBA\_HIGH & LBA bits 23--16 \\
+\hexa{1F6} & DRIVE & Drive select + LBA bits 27--24 \\
+\hexa{1F7} & STATUS / COMMAND & Read: status. Write: command \\
+\hexa{3F6} & ALT\_STATUS & Status without side effects \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Note that \hexa{1F7} is two different registers depending on whether you read or write it. That kind
+of thing is normal in hardware and catches people out constantly.
+
+\section{Reading a sector}
+
+\filetag{lytlnybl/kernel/drivers/ata.c}
+\begin{lstlisting}[style=c]
+bool ata_read_sector(uint32_t lba, void* buffer) {
+  uint16_t *data = (uint16_t*)buffer;
+
+  if (lba > 0x0FFFFFFF) return false;      /* beyond 28-bit LBA */
+
+  ata_select_drive(lba);                   /* drive + top 4 LBA bits */
+
+  outb(ATA_SECTOR_COUNT, 1);               /* one sector */
+
+  outb(ATA_LBA_LOW,  lba & 0xFF);
+  outb(ATA_LBA_MID,  (lba >> 8)  & 0xFF);
+  outb(ATA_LBA_HIGH, (lba >> 16) & 0xFF);
+
+  outb(ATA_COMMAND, ATA_CMD_READ_PIO);     /* 0x20 */
+
+  if (!ata_wait_drq()) return false;       /* wait for data to be ready */
+
+  for (int i = 0; i < 256; i++) {
+    data[i] = inw(ATA_DATA);               /* 256 words = 512 bytes */
+  }
+
+  ata_400ns_delay();
+  return true;
+}
+\end{lstlisting}
+
+The 28-bit LBA is split across four registers because each port is 8 bits wide: three full bytes
+plus the low nibble of the drive register.
+
+\begin{concept}{Why 256 iterations and not 512}
+The data port is 16 bits wide, so each \cod{inw} brings in two bytes. $256 \times 2 = 512$: one
+sector. This is why the buffer is cast to \cod{uint16\_t*} --- and also why passing an odd-aligned
+buffer would be a bad idea.
+\end{concept}
+
+\subsection{Waiting correctly}
+
+\begin{lstlisting}[style=c]
+static bool ata_wait_drq() {
+  uint8_t status;
+  for (;;) {
+    status = inb(ATA_STATUS);
+    if (status & ATA_STATUS_BSY) continue;   /* still busy: keep waiting */
+    if (status & ATA_STATUS_ERR) return false;
+    if (status & ATA_STATUS_DF)  return false;   /* device fault */
+    if (status & ATA_STATUS_DRQ) return true;    /* data ready */
+  }
+}
+\end{lstlisting}
+
+\begin{warn}{The order of the checks is not optional}
+BSY must be tested \emph{first}. While BSY is set, every other bit in the status register is
+meaningless --- the controller is mid-update. Checking ERR before BSY can read a stale error bit
+from a previous command and abort a perfectly good read.
+
+Note also that this loop has no timeout. A disk that never clears BSY hangs the kernel forever.
+Real drivers count iterations and give up.
+\end{warn}
+
+\begin{lstlisting}[style=c]
+static void ata_400ns_delay() {
+  inb(ATA_ALT_STATUS);
+  inb(ATA_ALT_STATUS);
+  inb(ATA_ALT_STATUS);
+  inb(ATA_ALT_STATUS);
+}
+\end{lstlisting}
+
+The specification requires 400 nanoseconds between certain operations. Each read of the alternate
+status port takes about 100 ns on the bus, so four reads is the canonical way to wait. Reading the
+\emph{alternate} status port matters: reading the normal one at \hexa{1F7} clears the pending
+interrupt, which you may not want.
+
+\section{Writing}
+
+Writing mirrors reading with three differences: command \hexa{30} instead of \hexa{20},
+\cod{outw} instead of \cod{inw}, and a cache flush at the end:
+
+\begin{lstlisting}[style=c]
+  outb(ATA_COMMAND, ATA_CMD_WRITE_PIO);
+  if (!ata_wait_drq()) return false;
+  for (int i = 0; i < 256; i++) outw(ATA_DATA, data[i]);
+  ata_400ns_delay();
+  outb(ATA_COMMAND, ATA_CMD_FLUSH_CACHE);   /* 0xE7 */
+  ata_wait_bsy();
+\end{lstlisting}
+
+\begin{concept}{Why the flush}
+Disks buffer writes internally and report success immediately. If power is lost before the buffer
+reaches the platter, the data is gone. \cod{FLUSH\_CACHE} forces it out and does not return until it
+is physically committed.
+
+This is exactly what \cod{fsync()} does on a real system, and why databases care so much about it.
+\end{concept}
+
+% ============================================================
+\begin{recipe}{reading and writing raw sectors}{ch37-ata-sectors}
+Writes 512 bytes to LBA 2000 --- chosen to be far past both the kernel and the filesystem --- reads
+them back into a different buffer and compares. Then it reads disk sector 70 and finds
+\hexa{DEADBABE} in the first four bytes: the filesystem's superblock, seen as raw bytes by a driver
+that knows nothing about filesystems.
+
+Everything in the next three chapters is built on these two functions.
+\end{recipe}
+
+% ============================================================
+\chapter{Designing a filesystem}
+
+\begin{goals}
+  \item What structures are needed to turn a disk into files
+  \item What an inode is and why the name is not in it
+  \item How the on-disk layout is organised
+\end{goals}
+
+\section{The problem}
+
+A disk is an array of numbered 512-byte sectors. To turn that into ``files with names, in
+directories, of arbitrary size'', you need to answer three questions and store the answers
+\emph{on the disk itself}:
+
+\begin{enumerate}
+  \item Which blocks are free?
+  \item For a given file, which blocks hold its contents, and how big is it?
+  \item Given a name, which file is it?
+\end{enumerate}
+
+Each question gets its own structure: a \term{bitmap}, an \term{inode}, and a \term{directory}.
+
+\section{The layout}
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize,x=1cm,y=1cm]
+  \fill[redlight,draw=red]   (0,0)   rectangle (1.6,1.2);
+  \node[align=center,font=\tiny] at (0.8,0.6) {super-\\block};
+  \node[font=\ttfamily\tiny,text=gray] at (0.8,-0.3) {block 0};
+
+  \fill[amberlight,draw=amber] (1.6,0) rectangle (3.2,1.2);
+  \node[align=center,font=\tiny] at (2.4,0.6) {block\\bitmap};
+  \node[font=\ttfamily\tiny,text=gray] at (2.4,-0.3) {block 1};
+
+  \fill[accentlight,draw=accent] (3.2,0) rectangle (6.4,1.2);
+  \node[align=center,font=\tiny] at (4.8,0.6) {inode table\\128 inodes};
+  \node[font=\ttfamily\tiny,text=gray] at (4.8,-0.3) {blocks 2--13};
+
+  \fill[greenlight,draw=green] (6.4,0) rectangle (12.0,1.2);
+  \node[align=center,font=\tiny] at (9.2,0.6) {data blocks\\{\tiny file contents and directory contents}};
+  \node[font=\ttfamily\tiny,text=gray] at (7.0,-0.3) {block 14 onwards};
+
+  \draw[decorate,decoration={brace,amplitude=4pt},gray] (0,1.35) -- (12.0,1.35)
+    node[midway,above,font=\sffamily\tiny,text=gray] {everything offset by FS\_START\_BLOCK = disk sector 70};
+\end{tikzpicture}
+\end{center}
+
+\filetag{lytlnybl/include/filesystem/fs\_layout.h}
+\begin{lstlisting}[style=c]
+#define FS_BLOCK_SIZE 512
+#define FS_START_BLOCK 70        /* the filesystem starts at disk sector 70 */
+#define FS_SUPERBLOCK 0
+#define FS_BITMAP_BLOCK 1
+#define FS_INODE_START 2
+#define FS_TOTAL_BLOCKS 1000
+#define FS_TOTAL_INODES 128
+#define FS_INODE_MAX_BLOCKS 10
+#define FS_FILENAME_LENGTH 32
+#define FS_MAGIC 0xDEADBABE
+\end{lstlisting}
+
+The whole filesystem is shifted 70 sectors into the disk, leaving room for the boot sector and the
+kernel. The translation is one line:
+
+\begin{lstlisting}[style=c]
+bool fs_read_block(uint32_t block_num, void* buffer) {
+  uint32_t sector = FS_START_BLOCK + block_num;
+  return ata_read_sector(sector, buffer);
+}
+\end{lstlisting}
+
+\section{The superblock}
+
+Block 0 describes the filesystem itself:
+
+\begin{lstlisting}[style=c]
+typedef struct {
+  uint32_t magic;          /* 0xDEADBABE */
+  uint32_t block_size;
+  uint32_t total_blocks;
+  uint32_t bitmap_start;
+  uint32_t inode_start;
+  uint32_t inode_count;
+  uint32_t inode_blocks;
+  uint32_t root_inode;
+  uint32_t data_start;
+  uint32_t free_blocks;
+  uint32_t free_inodes;
+} fs_superblock_t;
+\end{lstlisting}
+
+\begin{concept}{The magic number}
+\cod{fs\_read\_superblock} refuses to proceed if the magic does not match:
+\begin{lstlisting}[style=c]
+if (superblock->magic != FS_MAGIC) return false;
+\end{lstlisting}
+Without it, pointing the driver at an unformatted disk would make it read random bytes as
+\cod{inode\_count} and \cod{data\_start}, and then happily write structures all over it. The magic
+number costs four bytes and turns silent destruction into a clean failure.
+\end{concept}
+
+\section{Inodes}
+
+\begin{lstlisting}[style=c]
+typedef struct {
+  uint32_t size;                        /* size in bytes */
+  uint16_t type;                        /* free, file or directory */
+  uint32_t blocks[FS_INODE_MAX_BLOCKS]; /* 10 direct block pointers */
+} fs_inode_t;
+\end{lstlisting}
+
+\begin{concept}{Why the name is not in the inode}
+This is the design decision that defines Unix-style filesystems, and it surprises everyone the first
+time.
+
+An inode describes a \emph{file}: its size, its type, where its data lives. The \emph{name} lives in
+the directory that contains it. So a file can have several names (hard links), all pointing at one
+inode and one copy of the data. Renaming a file touches only the directory, not the file.
+
+lytlnyblOS does not implement hard links, but it inherits the structure --- which means adding them
+later would be almost free.
+\end{concept}
+
+With 10 direct pointers and 512-byte blocks, the maximum file size is $10 \times 512 = 5120$ bytes.
+
+\begin{warn}{5 KB is small, and the code knows it}
+That is enough for the shell binary (4,392 bytes) but not much more --- and \cod{user\_test} plus
+the shell together already use most of the inode table's useful capacity.
+
+The classic solution is \term{indirect blocks}: the eleventh pointer points not at data but at a
+block full of \emph{more} pointers. With 512-byte blocks that is 128 extra pointers, taking the
+maximum to about 69 KB. A double-indirect pointer gets you to 8 MB. This is exactly how ext2 works,
+and adding single indirection here is a very instructive exercise.
+\end{warn}
+
+\section{Directories are files}
+
+A directory is an inode of type \cod{FS\_TYPE\_DIRECTORY} whose data blocks contain an array of
+fixed-size records:
+
+\begin{lstlisting}[style=c]
+typedef struct {
+  uint32_t inode;                  /* 0 means the slot is empty */
+  char name[FS_FILENAME_LENGTH];   /* 32 bytes */
+} fs_directory_entry_t;
+\end{lstlisting}
+
+Each entry is 36 bytes, so a 512-byte block holds 14 of them.
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize,
+  b/.style={draw=grayborder,rounded corners=2pt,minimum width=3.0cm,minimum height=0.7cm,align=center}]
+  \node[b,fill=accentlight] (i0) at (0,1.6) {inode 0\\{\tiny type=DIR, blocks[0]=14}};
+  \node[b,fill=greenlight,minimum width=4.4cm] (d) at (5.4,1.6)
+    {block 14 (directory contents)};
+  \node[font=\ttfamily\tiny,align=left,anchor=west] at (3.4,0.55)
+    {\{1, "bin"\}\\ \{2, "file.txt"\}\\ \{3, "notes.txt"\}\\ \{0, ""\} \ldots};
+  \draw[-{Stealth[length=2mm]},accent] (i0) -- (d);
+\end{tikzpicture}
+\end{center}
+
+\begin{concept}{Recursion bottoms out at the root}
+To find \cod{/bin/shell} you read the root directory to find \cod{bin}, then read \cod{bin} to find
+\cod{shell}. But how do you find the root, when there is no directory containing it?
+
+By convention: the root is always inode 0. \cod{FS\_ROOT\_INODE} is the fixed point that makes the
+whole recursive structure resolvable.
+\end{concept}
+
+\section{Path resolution}
+
+\filetag{lytlnybl/filesystem/fs\_manager.c}
+\begin{lstlisting}[style=c]
+int32_t fs_resolve_path(const char* path) {
+  if (!path || path[0] != '/') return -1;    /* absolute paths only */
+
+  uint32_t current_inode = FS_ROOT_INODE;
+  uint32_t i = 1;
+
+  while (path[i] != '\0') {
+    char name[FS_FILENAME_LENGTH];
+    uint32_t name_length = 0;
+
+    while (path[i] == '/') i++;              /* skip repeated slashes */
+    if (path[i] == '\0') break;
+
+    while (path[i] != '/' && path[i] != '\0') {
+      if (name_length >= FS_FILENAME_LENGTH - 1) return -1;
+      name[name_length++] = path[i++];
+    }
+    name[name_length] = '\0';
+
+    int32_t inode = fs_find_directory_entry(current_inode, name);
+    if (inode < 0) return -1;
+
+    current_inode = inode;
+  }
+  return current_inode;
+}
+\end{lstlisting}
+
+Split on slashes, look each component up in the current directory, move down. The bounds check
+inside the inner loop is what stops a 200-character path component from overflowing the 32-byte
+local array --- exactly the kind of check that is missing elsewhere in this codebase.
+
+\begin{warn}{No \cod{.} or \cod{..}}
+There is no current directory and no parent directory. Every path must be absolute, and
+\cod{cd} does not exist. Adding them means creating two entries in every directory at \cod{mkdir}
+time and handling them in resolution --- a contained and worthwhile exercise.
+\end{warn}
+
+% ============================================================
+\chapter{File descriptors and the manager}
+
+\begin{goals}
+  \item What a file descriptor is and why it is just an index
+  \item Why descriptors 0, 1 and 2 are special
+  \item How reading and writing cross block boundaries
+\end{goals}
+
+\section{The open file table}
+
+\filetag{lytlnybl/include/filesystem/fs\_manager.h}
+\begin{lstlisting}[style=c]
+#define FS_MAX_OPEN_FILES 16
+#define FS_FD_OFFSET 3
+
+typedef struct {
+    uint32_t inode;
+    uint32_t offset;    /* current read/write position */
+    bool used;
+} fs_file_t;
+\end{lstlisting}
+
+\begin{lstlisting}[style=c]
+static fs_file_t open_files[FS_MAX_OPEN_FILES];
+
+int32_t fs_open(const char* path) {
+  int32_t inode = fs_resolve_path(path);
+  if (inode < 0) return -1;
+
+  for (int i = 0; i < FS_MAX_OPEN_FILES; i++) {
+    if (!open_files[i].used) {
+      open_files[i].used = true;
+      open_files[i].inode = inode;
+      open_files[i].offset = 0;
+      return i + FS_FD_OFFSET;
+    }
+  }
+  return -1;
+}
+\end{lstlisting}
+
+\begin{concept}{A descriptor is an index, nothing more}
+A file descriptor is not a pointer and not a handle. It is the array index of a slot in the kernel's
+open-file table, plus 3.
+
+That indirection is deliberate and important: the user program holds a small integer that means
+nothing outside the kernel. It cannot forge a pointer to a file structure, cannot corrupt the table,
+cannot reach another process's files. The kernel validates the index on every use:
+\begin{lstlisting}[style=c]
+fd -= FS_FD_OFFSET;
+if (fd < 0 || fd >= FS_MAX_OPEN_FILES) return -1;
+if (!open_files[fd].used) return -1;
+\end{lstlisting}
+This is the same design idea as virtual addresses: hand out names, not places.
+\end{concept}
+
+\subsection{Why the offset of 3}
+
+Unix reserves three descriptors by convention:
+
+\begin{center}
+\begin{tabularx}{0.9\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{fd} & \textbf{Name} & \textbf{In lytlnyblOS} \\
+\midrule
+0 & stdin  & The keyboard \\
+1 & stdout & The screen \\
+2 & stderr & The screen \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+So real files start at 3. That is what \cod{FS\_FD\_OFFSET} encodes, and it is why the system call
+handler can dispatch on the number alone:
+
+\filetag{lytlnybl/kernel/interrupts.c}
+\begin{lstlisting}[style=c]
+if (fd > 2) {
+    regs->eax = fs_write(fd, (void*)buffer, count);   /* a real file */
+    break;
+}
+/* otherwise: the screen */
+vga_text_write(&terminal, (char*)buffer);
+\end{lstlisting}
+
+\begin{warn}{The table is global, not per process}
+\cod{open\_files} is a single static array shared by every process. Two processes opening files get
+different slots, which works --- but a process can pass any descriptor number and reach another
+process's open file. And there is no cleanup: if a process exits without calling \cod{close}, the
+slot leaks forever. Sixteen leaked descriptors and no file can be opened again.
+
+A real system keeps a per-process descriptor table pointing into a global open-file table, and closes
+everything on exit. That is two structures instead of one, and it is what makes descriptors actually
+safe.
+\end{warn}
+
+\section{Reading across blocks}
+
+A file's data lives in up to 10 scattered blocks, but the caller wants a flat byte range. The
+translation is the interesting part:
+
+\filetag{lytlnybl/filesystem/fs.c}
+\begin{lstlisting}[style=c]
+int32_t fs_read_file(uint32_t file_inode_num, void* read_buffer,
+                     uint32_t size, uint32_t offset) {
+  fs_inode_t file_inode;
+  uint8_t buffer[FS_BLOCK_SIZE];
+
+  if (!fs_read_inode(file_inode_num, &file_inode)) return -1;
+
+  if (offset >= file_inode.size) return 0;      /* EOF is 0 bytes, not an error */
+
+  if (offset + size > file_inode.size)
+    size = file_inode.size - offset;            /* clamp to the real size */
+
+  uint32_t bytes_read = 0;
+  uint8_t* destination = (uint8_t*)read_buffer;
+
+  while (bytes_read < size) {
+    uint32_t position = offset + bytes_read;
+
+    uint32_t block_index  = position / FS_BLOCK_SIZE;   /* which block */
+    uint32_t block_offset = position % FS_BLOCK_SIZE;   /* where inside it */
+
+    if (block_index >= FS_INODE_MAX_BLOCKS) break;
+
+    if (!fs_read_block(file_inode.blocks[block_index], buffer)) return -1;
+
+    uint32_t bytes = FS_BLOCK_SIZE - block_offset;      /* rest of this block */
+    if (bytes > size - bytes_read)
+      bytes = size - bytes_read;                        /* or less, if that is all we need */
+
+    memcpy(destination + bytes_read, buffer + block_offset, bytes);
+    bytes_read += bytes;
+  }
+
+  return bytes_read;
+}
+\end{lstlisting}
+
+\begin{concept}{The same division as paging}
+\cod{position / BLOCK\_SIZE} and \cod{position \% BLOCK\_SIZE}. It is exactly the arithmetic from
+Chapter 26, where a virtual address split into a page number and an offset within the page.
+
+The idea is identical: a flat linear space is mapped onto fixed-size chunks that live somewhere
+scattered, and a division plus a remainder does the translation. Once you see this pattern, you see
+it everywhere in systems --- pages, disk blocks, network packets, cache lines.
+\end{concept}
+
+\begin{warn}{EOF is 0, not an error}
+The comment in the source says it: \cod{//EOF should return 0 bytes instead of an error}. This
+matters enormously for the shell's \cod{cat}:
+\begin{lstlisting}[style=c]
+while ((n = read(fd, buffer, sizeof(buffer))) > 0) {
+    write(1, buffer, n);
+}
+\end{lstlisting}
+The loop ends on 0. If EOF returned $-1$, the condition \cod{> 0} would also end the loop --- but
+the caller could not distinguish ``finished'' from ``disk error''. Getting these conventions right is
+what makes a filesystem usable.
+\end{warn}
+
+% ============================================================
+\begin{recipe}{creating, writing and reading files}{ch39-filesystem}
+Makes a directory, creates a file in it, writes to it, closes and reopens it to read the contents
+back, shows that a second read returns 0 for end of file rather than an error, lists both
+directories and finally deletes the file.
+
+The close-and-reopen is the point. A descriptor carries an offset that only moves forwards and
+there is no \cod{lseek}, so after writing eight bytes the offset is at eight and reading returns
+nothing. The kernel's own boot-time test does the same dance for the same reason.
+\end{recipe}
+
+% ============================================================
+\chapter{mkfs: formatting from outside}
+
+\begin{goals}
+  \item Why a tool that runs on the host is needed
+  \item How files get into the image before the system ever boots
+  \item How the same header serves two completely different programs
+\end{goals}
+
+\section{The chicken and egg}
+
+The system needs \cod{/bin/shell} to exist before it can run anything. But to create a file you need
+a running system. Something has to break the cycle from outside.
+
+\cod{mkfs} is that something: a program compiled for \emph{your} Linux machine, not for lytlnyblOS,
+which opens the disk image as an ordinary file and writes the filesystem structures into it
+directly.
+
+\filetag{lytlnybl/Makefile}
+\begin{lstlisting}[style=mk]
+HOST_CC = gcc
+
+$(MKFS): tools/mkfs.c
+	mkdir -p $(dir $@)
+	$(HOST_CC) -g -Iinclude $< -o $@
+\end{lstlisting}
+
+Note \cod{HOST\_CC = gcc}, not \cod{i686-elf-gcc}. This one program is deliberately built for the
+host.
+
+\begin{concept}{One header, two worlds}
+\cod{mkfs.c} includes \filepath{include/filesystem/fs\_layout.h} --- the \emph{same} header the
+kernel uses. So the definitions of the superblock, inodes and directory entries are shared between a
+64-bit Linux program and a 32-bit freestanding kernel.
+
+This is why the structures are so carefully defined with fixed-width types (\cod{uint32\_t}, not
+\cod{int}). A plain \cod{int} might be a different size on each side, and the two programs would
+disagree about the layout of the disk --- a bug that would look like random filesystem corruption.
+\end{concept}
+
+\section{What it does}
+
+\begin{lstlisting}[style=c]
+int main(int argc, char **argv) {
+  FILE *image = fopen(argv[1], "r+b");     /* open the image read/write */
+
+  printf("formatting %s..........\n", argv[1]);
+
+  if (!format_filesystem(image)) { /* ... */ }
+
+  fs_superblock_t sb_copy;
+  uint8_t buffer[FS_BLOCK_SIZE];
+  read_block(image, FS_SUPERBLOCK, buffer);
+  memcpy(&sb_copy, buffer, sizeof(fs_superblock_t));
+
+  if (!install_rootfs(image, &sb_copy)) { /* ... */ }
+
+  fclose(image);
+  printf("mkfs success\n");
+}
+\end{lstlisting}
+
+Two phases: write empty structures, then copy in the contents of \filepath{rootfs/}. The
+host-side block functions are the exact analogue of the kernel's:
+
+\begin{lstlisting}[style=c]
+static bool write_block(FILE *image, uint32_t block_num, const void *buffer) {
+  uint32_t sector = FS_START_BLOCK + block_num;
+  if (fseek(image, sector * FS_BLOCK_SIZE, SEEK_SET) != 0) return false;
+  return fwrite(buffer, 1, FS_BLOCK_SIZE, image) == FS_BLOCK_SIZE;
+}
+\end{lstlisting}
+
+\cod{fseek} plus \cod{fwrite} here; \cod{outb} plus \cod{inw} in the kernel. Same logical operation,
+two completely different mechanisms, one shared layout.
+
+\section{The build pipeline}
+
+\filetag{lytlnybl/Makefile}
+\begin{lstlisting}[style=mk]
+$(KERNEL_IMG): $(BOOTLOADER) $(KERNEL_BIN) $(MKFS) $(USER_TEST_ROOTFS) $(SHELL_ROOTFS)
+	dd if=/dev/zero of=$@ bs=512 count=20480   # a blank 10 MB image
+	dd if=$(BOOTLOADER) of=$@ conv=notrunc     # boot sector at sector 0
+	dd if=$(KERNEL_BIN) of=$@ seek=1 conv=notrunc  # kernel from sector 1
+	$(MKFS) $@                                 # filesystem from sector 70
+\end{lstlisting}
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize,
+  n/.style={draw=grayborder,rounded corners=2pt,minimum width=2.5cm,minimum height=0.75cm,align=center}]
+  \node[n,fill=purplelight] (a) at (0,0) {bootloader.asm};
+  \node[n,fill=accentlight] (b) at (0,-1.1) {kernel/*.c, *.asm};
+  \node[n,fill=greenlight] (c) at (0,-2.2) {user/*.c + libc.a};
+  \node[n,fill=graylight] (d) at (0,-3.3) {rootfs/bin/*};
+
+  \node[n,fill=amberlight,minimum height=3.6cm,minimum width=2.2cm] (img) at (5.6,-1.65) {\textbf{kernel.img}\\{\tiny 10 MB}};
+
+  \draw[-{Stealth[length=2mm]},purple] (a) -- node[above,font=\tiny]{dd} (img);
+  \draw[-{Stealth[length=2mm]},accent] (b) -- node[above,font=\tiny]{dd seek=1} (img);
+  \draw[-{Stealth[length=2mm]},green] (c) -- node[below,font=\tiny]{cp to rootfs} (d);
+  \draw[-{Stealth[length=2mm]},gray] (d) -- node[below,font=\tiny]{mkfs} (img);
+
+  \node[n,fill=redlight,minimum width=2.6cm] (q) at (10.2,-1.65) {QEMU};
+  \draw[-{Stealth[length=2.5mm]},red,thick] (img) -- node[above,font=\tiny]{make run} (q);
+\end{tikzpicture}
+\end{center}
+
+\begin{tryit}
+Run \cod{make} and watch the last lines:
+\begin{lstlisting}[style=txt]
+formatting build/kernel.img..........
+mkfs success
+\end{lstlisting}
+Then boot. The kernel prints the contents of \cod{/} and \cod{/bin} during its self-test, and you
+should see \cod{shell} and \cod{user\_test} listed --- files that were placed there by a program
+running on your Linux machine, read back by a filesystem driver running on a 32-bit kernel you
+wrote.
+\end{tryit}
+
+\begin{summary}
+Storage works end to end: a disk driver, a filesystem, descriptors, and a way to get files in from
+outside. Everything the shell needs now exists. The next part assembles it.
+\end{summary}

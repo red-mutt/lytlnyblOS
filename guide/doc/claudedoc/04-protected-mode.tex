@@ -1,0 +1,601 @@
+\part{Protected mode: unlocking the processor}
+
+\chapter{Why real mode will not do}
+
+\begin{goals}
+  \item The three fatal limitations of real mode
+  \item What the system gains by switching modes
+  \item What is lost in the switch, and why timing matters
+\end{goals}
+
+\section{Three fatal limitations}
+
+Real mode exists for compatibility with software from 1981. It has three problems that make it
+useless for a genuine operating system:
+
+\begin{description}
+  \item[Only 1 MB of memory] With the \cod{segment$\times$16 + offset} scheme, the highest possible
+    address is $\text{FFFF}\times16+\text{FFFF} = \text{10FFEF}$, barely over 1 MB. It does not
+    matter that the machine has 16 GB: in real mode they do not exist.
+  \item[16-bit registers] Everything is 16 bits. Pointers, counters, arithmetic. Manipulating a
+    32-bit address requires constant juggling.
+  \item[\textbf{No protection whatsoever}] And this is the decisive one. In real mode \emph{any}
+    code can write to \emph{any} address, execute \emph{any} instruction, and switch off interrupts
+    whenever it feels like it. There are no rings, no pages, no permissions. An operating system
+    whose job is to isolate programs cannot run on a mode that offers no isolation mechanism.
+\end{description}
+
+\begin{concept}{What you gain}
+32-bit \term{protected mode} provides exactly what is missing: 4 GB addressable, 32-bit registers,
+the four privilege rings, segments with permissions, and --- most importantly --- the ability to
+enable \hi{paging}, the foundation of virtual memory.
+\end{concept}
+
+\section{What you lose}
+
+The switch is not free: on entering protected mode, \hi{BIOS services stop working}.
+\cod{int 10h}, \cod{int 13h}, \cod{int 15h}: all of them are 16-bit code that assumes real mode.
+
+Hence the ordering in the bootloader we saw in the previous part: print, read the disk and request
+the memory map first (all through the BIOS), and only then switch modes. From that moment on,
+anything you want from the hardware you will have to program yourself.
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize]
+  \fill[amberlight,draw=amber,rounded corners=3pt] (0,0) rectangle (5.2,2.4);
+  \node[font=\sffamily\bfseries,text=amber] at (2.6,2.1) {REAL MODE};
+  \node[align=left,anchor=north west,font=\scriptsize] at (0.3,1.75)
+    {\textcolor{green}{$\checkmark$} BIOS services\\
+     \textcolor{red}{$\times$} Only 1 MB\\
+     \textcolor{red}{$\times$} 16 bits\\
+     \textcolor{red}{$\times$} No protection};
+
+  \fill[greenlight,draw=green,rounded corners=3pt] (7.0,0) rectangle (12.2,2.4);
+  \node[font=\sffamily\bfseries,text=green] at (9.6,2.1) {PROTECTED MODE};
+  \node[align=left,anchor=north west,font=\scriptsize] at (7.3,1.75)
+    {\textcolor{red}{$\times$} No BIOS services\\
+     \textcolor{green}{$\checkmark$} 4 GB\\
+     \textcolor{green}{$\checkmark$} 32 bits\\
+     \textcolor{green}{$\checkmark$} Rings and paging};
+
+  \draw[-{Stealth[length=3mm]},accent,line width=1.5pt] (5.4,1.2) -- (6.8,1.2);
+  \node[font=\sffamily\tiny,text=accent,align=center] at (6.1,1.55) {one-way\\trip};
+\end{tikzpicture}
+\end{center}
+
+% ============================================================
+\chapter{The GDT: memory's driving licence}
+
+\begin{goals}
+  \item What a segment descriptor is and what information it carries
+  \item How to decode a descriptor byte by byte
+  \item What a selector is and how it relates to privilege rings
+  \item Why we use a ``flat'' model and what that means
+\end{goals}
+
+\section{The problem it solves}
+
+In protected mode, segment registers (\reg{CS}, \reg{DS}, \reg{SS}\ldots) no longer hold a number
+to be multiplied by 16. They now hold a \term{selector}: an index into a table of
+\term{descriptors}. And each descriptor states, for that region of memory:
+
+\begin{itemize}
+  \item where it starts (\emph{base}, 32 bits),
+  \item how far it extends (\emph{limit}, 20 bits),
+  \item what may be done with it (execute, read, write),
+  \item \hi{from which privilege ring it may be used}.
+\end{itemize}
+
+That table is the \term{GDT} (Global Descriptor Table). It is the first thing that must be built,
+because without it the processor refuses to enter protected mode.
+
+\begin{analogy}
+In real mode, a memory address is like saying ``house number 30 on the street that starts at
+kilometre 7''. Anyone can name any house.
+
+In protected mode you first show a badge (the selector). The badge refers to a record (the
+descriptor) stating which area you may visit, whether you may enter or only look through the
+window, and what clearance you need. The processor checks the record on \emph{every} access, in
+hardware, at no cost. If you do not qualify, you do not get in.
+\end{analogy}
+
+\section{A descriptor, dissected}
+
+Each descriptor occupies 8 bytes, with its fields chopped up and scattered in a way explicable only
+by backwards compatibility with the 80286:
+
+\begin{center}
+\begin{tikzpicture}[font=\ttfamily\tiny,x=1.42cm,y=1cm]
+  \foreach \i/\c/\t in {0/accentlight/{limit\\15--0},1/accentlight/{limit\\15--0},
+                        2/purplelight/{base\\15--0},3/purplelight/{base\\15--0},
+                        4/purplelight/{base\\23--16},5/amberlight/{access},
+                        6/greenlight/{flags +\\limit 19--16},7/purplelight/{base\\31--24}} {
+    \draw[draw=grayborder,fill=\c] (\i,0) rectangle (\i+0.94,1);
+    \node[align=center,font=\sffamily\tiny] at (\i+0.47,0.5) {\t};
+    \node[font=\ttfamily\tiny,text=gray] at (\i+0.47,-0.28) {byte \i};
+  }
+\end{tikzpicture}
+\end{center}
+
+The important field is the \term{access} byte. Its eight bits mean:
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}c l X@{}}
+\toprule
+\textbf{Bit} & \textbf{Name} & \textbf{Meaning} \\
+\midrule
+7 & P    & Present. If 0, the descriptor is invalid and using it raises an exception \\
+6--5 & DPL & \textbf{Privilege level}: 00 = ring 0 (kernel), 11 = ring 3 (user) \\
+4 & S    & 1 = code or data segment; 0 = system segment (TSS, gates) \\
+3 & E    & 1 = executable (code); 0 = data \\
+2 & DC   & Direction / conforming \\
+1 & RW   & For code: is it readable? For data: is it writable? \\
+0 & A    & Accessed; set by the processor itself \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{The lytlnyblOS GDT}
+
+Our table has six entries. Here they are, with the access byte decoded:
+
+\filetag{lytlnybl/kernel/kernel\_intro.asm}
+\begin{lstlisting}[style=asm]
+gdt_start:
+gdt_null:
+    dq 0                ; entry 0: mandatorily null
+
+gdt_code:               ; selector 0x08 - kernel code
+    dw 0xFFFF           ; limit low
+    dw 0x0000           ; base low
+    db 0x00             ; base middle
+    db 0x9A             ; access: present, ring 0, code, readable
+    db 0xCF             ; flags: 4K granularity + 32-bit, limit high
+    db 0x00             ; base high
+
+gdt_data:               ; selector 0x10 - kernel data
+    dw 0xFFFF
+    dw 0x0000
+    db 0x00
+    db 0x92             ; access: present, ring 0, data, writable
+    db 0xCF
+    db 0x00
+
+gdt_user_code:          ; selector 0x18 - user code
+    dw 0xFFFF
+    dw 0x0000
+    db 0x00
+    db 0xFA             ; access: present, RING 3, code, readable
+    db 0xCF
+    db 0x00
+
+gdt_user_data:          ; selector 0x20 - user data
+    dw 0xFFFF
+    dw 0x0000
+    db 0x00
+    db 0xF2             ; access: present, RING 3, data, writable
+    db 0xCF
+    db 0x00
+
+gdt_tss:                ; selector 0x28 - filled in later, from C
+    dw 0
+    dw 0
+    db 0
+    db 0
+    db 0
+    db 0
+gdt_end:
+\end{lstlisting}
+
+\subsection{Decoding \hexa{9A} and \hexa{FA}}
+
+These two bytes are the difference between the kernel and a user program. Bit by bit:
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}l c c c c c c c c X@{}}
+\toprule
+ & \textbf{P} & \multicolumn{2}{c}{\textbf{DPL}} & \textbf{S} & \textbf{E} & \textbf{DC} & \textbf{RW} & \textbf{A} & \\
+\midrule
+\hexa{9A} = \cod{10011010} & 1 & 0 & 0 & 1 & 1 & 0 & 1 & 0 & code, \textbf{ring 0} \\
+\hexa{FA} = \cod{11111010} & 1 & 1 & 1 & 1 & 1 & 0 & 1 & 0 & code, \textbf{ring 3} \\
+\hexa{92} = \cod{10010010} & 1 & 0 & 0 & 1 & 0 & 0 & 1 & 0 & data, ring 0 \\
+\hexa{F2} = \cod{11110010} & 1 & 1 & 1 & 1 & 0 & 0 & 1 & 0 & data, ring 3 \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\hi{Those two DPL bits are the boundary between the two worlds of Chapter 7.} All of the
+system's isolation rests, literally, on them.
+
+\subsection{Base 0, maximum limit: the flat model}
+
+Notice that the four useful descriptors all have base \hexa{00000000} and limit \hexa{FFFFF} with
+4 KB granularity, which covers the full 4 GB.
+
+That means \emph{every segment is the same segment}: all of memory. It is called the \term{flat
+model}, and its advantage is enormous: the logical address you write in C is the linear address,
+with no strange translation. Segments stop being a way to separate memory and are left doing
+\hi{one job only}: carrying the privilege bits.
+
+\begin{concept}{Division of labour in modern x86}
+Since the 386, memory isolation is done with \hi{paging}, not segmentation. Segments are left
+flat and used only for privilege level. That is exactly what Linux does, and what lytlnyblOS does.
+Segmentation survives as a mandatory piece of paperwork you must fill in before you can use the
+thing that actually matters.
+\end{concept}
+
+\section{Selectors}
+
+A selector is a 16-bit number with three fields:
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize,x=1cm]
+  \draw[draw=grayborder,fill=accentlight] (0,0) rectangle (6.5,0.85);
+  \node at (3.25,0.42) {index into the table (13 bits)};
+  \draw[draw=grayborder,fill=graylight] (6.5,0) rectangle (7.7,0.85);
+  \node at (7.1,0.42) {TI};
+  \draw[draw=grayborder,fill=redlight] (7.7,0) rectangle (9.5,0.85);
+  \node at (8.6,0.42) {RPL};
+  \node[font=\ttfamily\tiny,text=gray] at (0.4,-0.3) {bit 15};
+  \node[font=\ttfamily\tiny,text=gray] at (9.1,-0.3) {bit 0};
+\end{tikzpicture}
+\end{center}
+
+Because the low two bits are the RPL, the index is shifted three positions up. Hence selectors go
+in steps of eight:
+
+\begin{center}
+\begin{tabularx}{0.95\textwidth}{@{}l l l X@{}}
+\toprule
+\textbf{Selector} & \textbf{Index} & \textbf{RPL} & \textbf{Points at} \\
+\midrule
+\hexa{00} & 0 & 0 & null descriptor \\
+\hexa{08} & 1 & 0 & kernel code \\
+\hexa{10} & 2 & 0 & kernel data \\
+\hexa{18} \cod{| 3} = \hexa{1B} & 3 & \textbf{3} & user code \\
+\hexa{20} \cod{| 3} = \hexa{23} & 4 & \textbf{3} & user data \\
+\hexa{28} & 5 & 0 & the TSS \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Which is why creating a user process looks like this:
+
+\filetag{lytlnybl/tasks/procman.c}
+\begin{lstlisting}[style=c]
+void create_uprocess(process_t* new_process) {
+    new_process->regs.cs = 0x18 | 3;   /* user code, RPL = 3 */
+    new_process->regs.ds = 0x20 | 3;   /* user data, RPL = 3 */
+    new_process->regs.ss = 0x20 | 3;
+    /* ... */
+}
+\end{lstlisting}
+
+\exercise{What would happen if a user process were created with \cod{cs = 0x18} without the
+\cod{| 3}? Think about what the processor checks when loading \reg{CS}. (Hint: one rule says the
+RPL may not be more privileged than the descriptor's DPL, and another forbids ``dropping''
+privilege through a plain \cod{iret}.)}
+
+% ============================================================
+\begin{recipe}{reading the live GDT}{ch16-gdt}
+Asks the processor for its own GDT with \cod{SGDT}, walks the six descriptors, decodes each access
+byte into P / DPL / S / E, and prints which selectors the kernel is currently running with.
+
+It surfaces something the source alone cannot tell you: \filepath{kernel\_intro.asm} writes
+\hexa{92} for the kernel data segment, but the live table reads back \hexa{93}. Bit 0 is
+\emph{Accessed}, and the processor sets it the first time the descriptor is loaded into a segment
+register. The TSS likewise reads \hexa{8B} rather than \hexa{89}, because \cod{ltr} sets bit 1,
+\emph{Busy}. The hardware writes into your GDT.
+\end{recipe}
+
+% ============================================================
+\chapter{The jump to 32 bits}
+
+\begin{goals}
+  \item The exact sequence for entering protected mode
+  \item Why a far jump is needed immediately afterwards
+  \item What the kernel stack is and where it lives
+\end{goals}
+
+\section{The sequence}
+
+\filetag{lytlnybl/kernel/kernel\_intro.asm}
+\begin{lstlisting}[style=asm]
+enter_protected:
+    cli                     ; 1. disable interrupts
+    lgdt [gdtr - start]     ; 2. load the GDT
+    mov eax, cr0
+    or eax, 1               ; 3. set the PE bit in CR0
+    mov cr0, eax
+
+    CODE_SEG equ gdt_code - gdt_start
+    jmp CODE_SEG:p_mode_main ; 4. far jump -> reload CS
+[bits 32]
+p_mode_main:
+    mov ax, 10h             ; 5. reload the data segments
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    mov ss, ax
+    mov esp, kernel_stack_top ; 6. set up the stack
+
+    mov byte [0xB8000], 'P'   ; 7. sign of life
+    mov byte [0xB8001], 0x02
+
+    extern kernel_main
+    call kernel_main          ; 8. enter C
+\end{lstlisting}
+
+\subsection{Step 1: \cod{cli}}
+
+Disables interrupts. It is essential: for the next few microseconds the processor is in an
+inconsistent state, with a new GDT but old segments. If an interrupt arrived, it would jump into
+the \emph{real mode} vector table, which no longer makes sense, and the machine would hang.
+
+Interrupts are not re-enabled until the end of \cod{idt\_init()}, already in C, once a valid 32-bit
+interrupt table exists.
+
+\subsection{Step 2: \cod{lgdt}}
+
+Loads the \reg{GDTR} register with the table's address and size. The operand format is peculiar:
+
+\begin{lstlisting}[style=asm]
+gdtr:
+    dw gdt_end - gdt_start - 1   ; limit: size MINUS ONE
+    dd gdt_start                 ; base address, 32 bits
+\end{lstlisting}
+
+\begin{warn}{The minus one}
+The limit is ``the last valid byte'', not ``the size''. With 6 descriptors of 8 bytes that is 48
+bytes, so the limit is 47. This is a classic bug: put 48 and the last descriptor falls partly out of
+range, and using it raises a general protection fault. The same convention applies to the IDT.
+\end{warn}
+
+\subsection{Step 3: the PE bit}
+
+\cod{or eax, 1} sets bit 0 of \reg{CR0}. At that instant the processor is \emph{already} in
+protected mode. But there is a subtlety.
+
+\subsection{Step 4: why the far jump is required}
+
+The processor internally caches (in a ``descriptor cache'') the information for the current
+segment, and that cache still holds the real-mode interpretation of \reg{CS}. Until \reg{CS} is
+reloaded, the processor keeps executing code as if it were 16-bit.
+
+And \reg{CS} \emph{cannot be modified with a \cod{mov}}. The only ways to change it are a far jump,
+a far call, or an \cod{iret}. Hence:
+
+\begin{lstlisting}[style=asm]
+jmp CODE_SEG:p_mode_main
+\end{lstlisting}
+
+That jump is the exact moment the processor begins executing 32-bit instructions. The \cod{[bits
+32]} directive right after it generates no code: it tells NASM to assemble for 32 bits from there.
+
+\begin{concept}{The instant of the switch}
+Three instructions mark the transition: \cod{mov cr0, eax} enables the mode, the far \cod{jmp}
+reloads \reg{CS}, and the \cod{mov}s reload the data segments. Until all three are done, the
+processor sits in an intermediate state where almost nothing behaves as you expect. That is why the
+whole block runs with interrupts off and calls nothing.
+\end{concept}
+
+\subsection{Step 6: the stack}
+
+\begin{lstlisting}[style=asm]
+section .bss
+align 16
+kernel_stack_bottom:
+    resb 0x4000          ; 16 KB of stack
+kernel_stack_top:
+\end{lstlisting}
+
+\cod{resb} reserves space without initialising it, in the \cod{.bss} section. Notice that
+\cod{kernel\_stack\_top} sits \emph{after} the 16 KB: since the stack grows downwards, \reg{ESP}
+must point at the end of the block.
+
+\begin{danger}{16 KB is not much}
+That is the entire kernel stack. Every function call consumes tens or hundreds of bytes; every
+local array, whatever it occupies. If the kernel overruns it, \reg{ESP} drops below
+\cod{kernel\_stack\_bottom} and starts clobbering whatever is there --- usually the kernel's own
+global variables. There is no check whatsoever: nobody warns you.
+
+Part XIII shows a real case where the system rebooted in a loop for exactly this reason, and how it
+was diagnosed.
+\end{danger}
+
+% ============================================================
+\chapter{Entering C}
+
+\begin{goals}
+  \item What compiling ``freestanding'' means and what disappears
+  \item What a linker script does and why it is mandatory here
+  \item How the \cod{.text}, \cod{.data} and \cod{.bss} sections relate
+\end{goals}
+
+\section{C without a standard library}
+
+Writing the kernel in C means giving up nearly everything you normally take for granted. The
+compiler's \cod{-ffreestanding} option says so:
+
+\filetag{lytlnybl/Makefile}
+\begin{lstlisting}[style=mk]
+CC = i686-elf-gcc
+CFLAGS = -g -m32 -Iinclude -ffreestanding
+\end{lstlisting}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{Flag} & \textbf{What it does} \\
+\midrule
+\cod{-m32} & Generate 32-bit code \\
+\cod{-ffreestanding} & Do not assume a standard library or a \cod{main()} exists; do not emit implicit calls to library functions \\
+\cod{-Iinclude} & Look for headers in \filepath{include/} \\
+\cod{-g} & Include debug information for GDB \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+What \emph{disappears}: \cod{printf}, \cod{malloc}, \cod{strlen}, \cod{FILE}, all of it. If the
+kernel wants to copy memory, somebody has to write \cod{memcpy}. And somebody does:
+
+\filetag{lytlnybl/kernel/kernel\_utils.c}
+\begin{lstlisting}[style=c]
+void* memcpy(void* dest, const void* src, size_t len) {
+  uint8_t* d = (uint8_t*)dest;
+  const uint8_t* s = (const uint8_t*)src;
+  for (size_t i = 0; i < len; i++)
+    d[i] = s[i];
+  return dest;
+}
+\end{lstlisting}
+
+\begin{warn}{What you can still use}
+The headers \cod{<stdint.h>}, \cod{<stddef.h>} and \cod{<stdbool.h>} \emph{are} available even in
+freestanding mode, because they define no functions: only types (\cod{uint32\_t}, \cod{size\_t},
+\cod{bool}). You will see them included throughout the project.
+\end{warn}
+
+\section{The linker script}
+
+The compiler produces chunks of code. The linker joins them and decides what address each one goes
+to. Normally that decision is made by default, but here \hi{the address matters}: the
+bootloader jumps to \hexa{9000} and the start of the kernel must be there.
+
+\filetag{lytlnybl/kernel/linker.ld}
+\begin{lstlisting}[style=txt]
+ENTRY(start)
+
+SECTIONS
+{
+    . = 0x9000;          /* the location counter starts here */
+
+    _kernel_start = .;   /* remember where we start */
+
+    .text : { *(.text) } /* executable code */
+    .data : { *(.data) } /* initialised globals */
+    .bss  : { *(.bss)  } /* zeroed globals */
+
+    _kernel_end = .;     /* remember where we end */
+}
+\end{lstlisting}
+
+The dot \cod{.} is the \term{location counter}: the address where the next thing will be placed.
+Assigning \hexa{9000} to it and then listing sections is, literally, placing pieces in memory.
+
+\subsection{The three sections}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Section} & \textbf{In the file?} & \textbf{Contains} \\
+\midrule
+\cod{.text} & yes & Machine code. Read-only in serious systems \\
+\cod{.data} & yes & Globals with an initial value: \cod{int x = 42;} \\
+\cod{.bss}  & \textbf{no} & Globals with no value or zero: \cod{int y;}. Only space is reserved \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\begin{concept}{Why \cod{.bss} takes no file space}
+If you have a global 16 KB array of zeros, it would be absurd to store 16 KB of zeros on disk. The
+linker notes ``16 KB of blank goes here'' and whoever loads the program is responsible for zeroing
+it.
+
+\hi{And here is a real trap in this project}: the thing that loads the kernel is the
+bootloader, which zeroes nothing; it simply copies sectors. It works because RAM happens to be zero
+at boot. It is a detail a serious system would have to handle explicitly.
+\end{concept}
+
+\subsection{The \cod{\_kernel\_start} and \cod{\_kernel\_end} symbols}
+
+These two labels are not variables: they are \emph{addresses} computed by the linker. From C they
+are declared like this:
+
+\filetag{lytlnybl/memory/pmm.c}
+\begin{lstlisting}[style=c]
+extern char _kernel_start;
+extern char _kernel_end;
+
+/* and used by taking their ADDRESS, not their value */
+uint32_t kernel_frame_index = (uint32_t)&_kernel_start / FRAME_SIZE;
+uint32_t kernel_frame_end   = (uint32_t)&_kernel_end   / FRAME_SIZE;
+\end{lstlisting}
+
+They are declared as \cod{char} and used with \cod{\&} because what matters is \emph{where they
+are}, not what they contain. Thanks to them the memory manager can mark exactly the pages the
+kernel occupies as used, with no magic numbers.
+
+\begin{danger}{A latent bug hiding in this division}
+Look at those two lines again. \cod{\_kernel\_end} almost never lands exactly on a page boundary:
+if it is \hexa{13468}, integer division gives 19, and the loop protects pages 9 through
+\textbf{18}. \hi{Page 19 --- holding the last 1,128 bytes of the kernel --- is left
+unprotected}, and the memory manager may hand it to anyone.
+
+If important global variables live in that page, the system overwrites itself. Today the project
+is lucky: the critical variables fall below the boundary. A few extra lines of code and that luck
+runs out. The fix is one line --- round up --- and it is applied in the current source. Part XIII
+gives the complete diagnosis, with the
+processor trace.
+\end{danger}
+
+\section{And finally, C}
+
+\begin{lstlisting}[style=asm]
+extern kernel_main
+call kernel_main
+\end{lstlisting}
+
+\cod{extern} tells NASM that the linker will resolve this symbol. \cod{call} pushes the return
+address and jumps. From that instruction on, we are executing compiled C, with a valid stack, 32
+bits and protected mode.
+
+\filetag{lytlnybl/kernel/kernel\_main.c}
+\begin{lstlisting}[style=c]
+void kernel_main(void)
+{
+    volatile char* vga = (volatile char*)0xB8000;
+    vga[0] = 'C';       /* sign of life: we reached C */
+    vga[1] = 0x02;      /* attribute: green on black */
+
+    vga_text_init(&terminal);
+    vga_text_writeline(&terminal, "Welcome to the lytlnyblOS!");
+
+    idt_init();
+    init_pmm();
+    init_vmm();
+    init_heap();
+    init_procman();
+    timer_init(100);
+    keyboard_init();
+    init_tss();
+    fs_manager_init();
+    /* ... */
+}
+\end{lstlisting}
+
+That initialisation order is not arbitrary: it is exactly the dependency chain from Chapter 6.
+Interrupts before anything else, because if something fails we want to see the message. Physical
+memory before virtual, because virtual needs to request pages from it. The heap after virtual,
+because it needs to map. Processes after the heap, because they allocate structures with
+\cod{kmalloc}.
+
+\begin{concept}{Why \cod{volatile}}
+\cod{volatile} tells the compiler: ``this pointer refers to something that can change for reasons
+you cannot see; do not optimise these accesses away''. Without it, an optimising compiler could
+delete the write to \hexa{B8000} entirely, reasoning that nobody reads that variable afterwards. In
+code that talks to hardware, \cod{volatile} is not optional.
+\end{concept}
+
+\begin{tryit}
+Boot with \cod{make run}. If a green \cod{P} appears in the top-left corner and then a green
+\cod{C}, you have passed both milestones: protected mode and entry into C. They are the two signs of
+life the code prints by hand, before any video driver exists.
+\end{tryit}
+
+\begin{summary}
+The processor is in protected mode, 32-bit, with a GDT holding four flat segments plus the TSS, its
+own stack, and executing C. We now have a decent programming environment. Next: being able to see
+what is happening.
+\end{summary}

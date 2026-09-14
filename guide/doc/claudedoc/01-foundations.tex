@@ -1,0 +1,692 @@
+\part{Foundations: the bare machine}
+
+\chapter{What a computer really is}
+
+\begin{goals}
+  \item What a processor does, and why it only ever does one thing
+  \item What memory is, and why it is just a giant list of numbers
+  \item What role buses and devices play
+  \item Why a powered-on computer with no software does absolutely nothing
+\end{goals}
+
+\section{Three parts and a loop}
+
+Strip away the screen, the keyboard, the case and the marketing. What is left is three things:
+
+\begin{enumerate}
+  \item A \hi{processor} (CPU) that knows how to execute very simple instructions, very fast.
+  \item A \hi{memory} (RAM), which is an extremely long row of numbered boxes, each holding
+        one small number.
+  \item Some \hi{devices} (disk, keyboard, video card, timer) connected by wires we call
+        \emph{buses}.
+\end{enumerate}
+
+And a loop. The processor always does the same thing, millions of times per second:
+
+\begin{center}
+\begin{tikzpicture}[
+  caja/.style={draw=accent,fill=accentlight,rounded corners=3pt,minimum width=3.1cm,
+               minimum height=1.05cm,align=center,font=\sffamily\small},
+  flecha/.style={-{Stealth[length=3mm]},accent,thick}
+]
+  \node[caja] (f) {\textbf{1. Fetch}\\{\scriptsize the instruction at EIP}};
+  \node[caja,right=1.3cm of f] (d) {\textbf{2. Decode}\\{\scriptsize what am I being asked?}};
+  \node[caja,right=1.3cm of d] (e) {\textbf{3. Execute}\\{\scriptsize do it}};
+  \draw[flecha] (f) -- (d);
+  \draw[flecha] (d) -- (e);
+  \draw[flecha] (e.south) -- ++(0,-0.75) -| node[pos=0.25,below,font=\scriptsize\sffamily,text=gray]
+        {move on to the next instruction} (f.south);
+\end{tikzpicture}
+\end{center}
+
+That is all. There is no magic, no intelligence, no ``the computer decides''. There is a register
+called \reg{EIP} holding a number: the memory address of the next instruction to execute. The CPU
+reads whatever is at that address, interprets it as an order, carries it out, and moves on. If the
+order was ``jump to address such-and-such'', \reg{EIP} becomes something else and the loop
+continues from there.
+
+\begin{concept}{The only question that matters}
+At any moment, the question that explains a computer's behaviour is: \emph{what is in \reg{EIP},
+and what is in the memory it points at?} All the work an operating system does amounts, in the
+end, to controlling the answer to that question.
+\end{concept}
+
+\section{Memory: a list of numbered boxes}
+
+Picture an infinitely long street with houses down one side. Each house has a number (its
+\hi{address}) and holds exactly one number between 0 and 255 (a \hi{byte}).
+
+\begin{center}
+\begin{tikzpicture}[scale=1,font=\ttfamily\scriptsize]
+  \foreach \i/\v in {0/4D,1/5A,2/90,3/00,4/03,5/00,6/00,7/00} {
+    \draw[draw=grayborder,fill=graylight] (\i*1.35,0) rectangle (\i*1.35+1.25,0.85);
+    \node at (\i*1.35+0.625,0.42) {\v};
+    \node[text=gray,font=\ttfamily\tiny] at (\i*1.35+0.625,-0.28) {0x100\i};
+  }
+  \draw[decorate,decoration={brace,amplitude=4pt},gray]
+    (0,1.0) -- (8*1.35-0.1,1.0) node[midway,above,font=\sffamily\scriptsize,text=gray]
+    {eight consecutive bytes of memory};
+\end{tikzpicture}
+\end{center}
+
+That is literally what RAM is. There are no ``variables'', no ``objects'', no ``strings''. There
+are boxes with numbers in them. Everything else is an \emph{interpretation} imposed by software.
+
+The same byte \hexa{41} can be:
+\begin{itemize}
+  \item the number 65,
+  \item the letter \cod{'A'} if we read it as ASCII text,
+  \item part of the instruction \cod{inc ecx} if the CPU reads it as code,
+  \item a dark grey pixel if the graphics card reads it as a colour.
+\end{itemize}
+
+\begin{concept}{Data has no type}
+A byte in memory does not ``know'' what it is. Type exists only in the programmer's head and in
+the code the compiler generates. This apparently philosophical point causes half the faults you
+will see in this course: when the system interprets data as code, or writes data over code, there
+is nothing stopping it by default.
+\end{concept}
+
+\subsection{Why things come in fours}
+
+Our processor is \hi{32-bit}. That means two things at once:
+
+\begin{itemize}
+  \item It works comfortably with 32-bit numbers, that is, 4 bytes. We call that group of 4 bytes
+        a \term{double word} (\emph{dword}).
+  \item Memory addresses are also 32-bit numbers. With 32 bits you can count up to
+        $2^{32} = 4{,}294{,}967{,}296$. That is why a 32-bit system can address at most
+        \hi{4 GB} of memory. It is not an arbitrary limitation: it is arithmetic.
+\end{itemize}
+
+\begin{warn}{Byte order (endianness)}
+x86 is \term{little-endian}: storing the number \hexa{12345678} at address 1000 lays the bytes
+down backwards from how you wrote them --- \hexa{78} at 1000, \hexa{56} at 1001, \hexa{34} at
+1002, \hexa{12} at 1003. It takes getting used to, and it confuses people badly when reading
+memory dumps in a debugger. It is not a whim: it simplifies the hardware when you only read the
+low byte of a large number.
+\end{warn}
+
+\section{Devices and buses}
+
+Processor and memory are not enough: we need to see something on screen and read something from
+the keyboard. Devices hang off shared wires called \term{buses}, and the processor talks to them
+in two distinct ways.
+
+\subsection{Way 1: memory-mapped}
+
+Some devices appear \emph{as if they were memory}. The video card in text mode is the perfect
+example: write a byte to address \hexa{B8000} and it is not stored in RAM --- it travels to the
+graphics card and a letter appears in the top-left corner of the screen.
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize,
+  b/.style={draw=accent,fill=accentlight,rounded corners=2pt,minimum width=2.4cm,minimum height=0.9cm,align=center}]
+  \node[b] (cpu) {CPU};
+  \node[b,right=2.6cm of cpu] (ram) {RAM\\{\tiny 0x00000--0x9FFFF}};
+  \node[b,below=0.9cm of ram] (vga) {Video card\\{\tiny 0xB8000--0xBFFFF}};
+  \draw[-{Stealth[length=2.5mm]},thick,accent] (cpu) -- node[above,text=gray]{\tiny write to 0x1000} (ram);
+  \draw[-{Stealth[length=2.5mm]},thick,purple] (cpu.south) |- node[pos=0.75,below,text=gray]{\tiny write to 0xB8000} (vga.west);
+\end{tikzpicture}
+\end{center}
+
+For the programmer this is convenient: writing to the screen is as simple as assigning through a
+pointer. You will see exactly that in Part V.
+
+\subsection{Way 2: I/O ports}
+
+Other devices live in a \emph{separate} address space, the \term{I/O port space}. It holds 65,536
+numbered mailboxes reachable only through two special processor instructions: \cod{in} (read from
+a port) and \cod{out} (write to a port).
+
+The keyboard, for example, lives at port \hexa{60}. The interrupt controller at \hexa{20} and
+\hexa{21}. The disk in the range \hexa{1F0}--\hexa{1F7}.
+
+\filetag{lytlnybl/kernel/interrupts.asm}
+\begin{lstlisting}[style=asm]
+outb:
+    mov al, [esp + 8]   ; the value to send
+    mov dx, [esp + 4]   ; the port number
+    out dx, al          ; send it
+    ret
+\end{lstlisting}
+
+Those four lines are the entire mechanism. From C they are wrapped in functions, and from then on
+``talking to hardware'' means calling \cod{outb(port, value)}.
+
+\begin{analogy}
+Memory-mapped I/O is like leaving a note on someone's desk: you write it, and the note is there.
+Ports are like an intercom: you have to dial the office number (\reg{DX}), say the phrase
+(\reg{AL}) and press the button (\cod{out}). The effect is not stored anywhere; it simply
+\emph{happens}.
+\end{analogy}
+
+\section{Why a powered-on computer does nothing}
+
+Here is the question almost nobody asks, and which is the starting point of this whole course:
+when you press the power button, what does the processor execute?
+
+The CPU wakes up with \reg{EIP} pointing at a fixed address, hard-wired into the silicon. There is
+no RAM at that address (RAM has just powered on and contains garbage): there is a read-only memory
+chip holding the \term{firmware}, which on a classic PC is called the \hi{BIOS}.
+
+In other words: the computer does not ``boot itself''. It boots because the manufacturer put a
+program in a chip, at exactly the address the processor looks at when it wakes. And that program,
+after checking the hardware, has to find \emph{another} program on disk and hand over to it. And
+that other program has to load the operating system.
+
+\begin{concept}{The boot chain}
+Power on $\rightarrow$ firmware (BIOS) $\rightarrow$ boot sector (512 bytes on disk)
+$\rightarrow$ operating system kernel $\rightarrow$ user programs. Each link has exactly one job:
+leave the next one in a position to start. All of Part III is this chain.
+\end{concept}
+
+\exercise{Without reading ahead, reason it out: if the boot sector is exactly 512 bytes, why can
+it not contain the whole operating system? What is the minimum it would have to do?}
+
+% ============================================================
+\chapter{Binary, hexadecimal and bits}
+
+\begin{goals}
+  \item Read and write hexadecimal fluently
+  \item Understand the bit operations: AND, OR, XOR, NOT and shifts
+  \item Recognise the \cod{| FLAG}, \cod{\& \textasciitilde FLAG} and \cod{\& MASK} idioms that appear all over the code
+\end{goals}
+
+This chapter is short and purely practical. If you are already comfortable with bits, skim it and
+move on. If not, read it slowly: without this, 60\,\% of operating system code looks like noise.
+
+\section{Why hexadecimal}
+
+A byte is 8 bits. In binary a byte reads \cod{11010110}: exact but unreadable. In decimal, 214:
+readable but telling you nothing about the bits.
+
+Hexadecimal (base 16) is the perfect middle ground because \hi{each hex digit corresponds to
+exactly 4 bits}. A byte is always two hex digits. No more, no less.
+
+\begin{center}
+\begin{tabularx}{0.92\textwidth}{@{}llllX@{}}
+\toprule
+\textbf{Hex} & \textbf{Binary} & \textbf{Decimal} & \textbf{Hex} & \textbf{Binary / Decimal} \\
+\midrule
+\cod{0} & \cod{0000} & 0 & \cod{8} & \cod{1000} \quad 8 \\
+\cod{1} & \cod{0001} & 1 & \cod{9} & \cod{1001} \quad 9 \\
+\cod{2} & \cod{0010} & 2 & \cod{A} & \cod{1010} \quad 10 \\
+\cod{3} & \cod{0011} & 3 & \cod{B} & \cod{1011} \quad 11 \\
+\cod{4} & \cod{0100} & 4 & \cod{C} & \cod{1100} \quad 12 \\
+\cod{5} & \cod{0101} & 5 & \cod{D} & \cod{1101} \quad 13 \\
+\cod{6} & \cod{0110} & 6 & \cod{E} & \cod{1110} \quad 14 \\
+\cod{7} & \cod{0111} & 7 & \cod{F} & \cod{1111} \quad 15 \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+With that table, \hexa{D6} translates at a glance: \cod{D} = \cod{1101}, \cod{6} = \cod{0110},
+so \cod{11010110}. And back again just as fast.
+
+\begin{concept}{Round numbers in hexadecimal}
+\hexa{1000} = 4096 = 4 KB. And that is no coincidence: \hi{4096 bytes is the size of a
+memory page} on x86. That is why you see addresses like \hexa{B8000}, \hexa{100000} or
+\hexa{C0000000} everywhere: they end in three hex zeros, which means they are page-aligned. When
+you see an address ending in \cod{000}, think ``start of a page''.
+\end{concept}
+
+Some figures worth memorising, because they appear constantly:
+
+\begin{center}
+\begin{tabularx}{0.92\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Value} & \textbf{Decimal} & \textbf{What it is in this course} \\
+\midrule
+\hexa{1000}      & 4,096         & one page / one memory frame \\
+\hexa{200}       & 512           & one disk sector, and the filesystem block size \\
+\hexa{B8000}     & 753,664       & start of video memory in text mode \\
+\hexa{7C00}      & 31,744        & where the BIOS loads the boot sector \\
+\hexa{100000}    & 1,048,576     & 1 MB; end of ``low memory'' \\
+\hexa{400000}    & 4,194,304     & 4 MB; where user code starts \\
+\hexa{C0000000}  & 3,221,225,472 & 3 GB; where the kernel heap starts \\
+\hexa{FFFFFFFF}  & 4,294,967,295 & the highest possible 32-bit address \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{The five bit operations}
+
+\subsection{AND (\cod{\&}): switching off and asking}
+
+\cod{a \& b} leaves a 1 only where \emph{both} had a 1. It has two uses:
+
+\begin{lstlisting}[style=c]
+/* 1. ASK whether a bit is set */
+if (status & ATA_STATUS_BSY) { /* the disk is busy */ }
+
+/* 2. KEEP part of a number (masking) */
+uint32_t base_address = entry & 0xFFFFF000;     /* the top 20 bits */
+uint16_t table_index  = (virtual >> 12) & 0x3FF; /* 10 bits */
+\end{lstlisting}
+
+The second form is everywhere in paging. \hexa{FFFFF000} has the top 20 bits set and the low 12
+clear: it keeps a page address and throws away the permission bits. \hexa{3FF} is ten ones: it
+keeps an index from 0 to 1023.
+
+\subsection{OR (\cod{|}): switching on}
+
+\cod{a | b} leaves a 1 where \emph{either} had one. This is how a value is built from flags:
+
+\begin{lstlisting}[style=c]
+map_page(dir, virtual, physical, PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER);
+\end{lstlisting}
+
+Each constant has exactly one bit set, so \cod{|} combines them without collision. This idiom ---
+define flags as powers of two, combine with \cod{|} --- appears dozens of times.
+
+\subsection{NOT (\cod{\textasciitilde}) with AND: switching one bit off}
+
+\begin{lstlisting}[style=c]
+bitmap[i / 32] &= ~(1 << (i % 32));   /* clear bit i */
+(*table)[index] &= ~(PAGE_PRESENT);   /* mark the page as not present */
+\end{lstlisting}
+
+\cod{\textasciitilde X} inverts every bit; ANDing with that clears exactly the bits that were set
+in \cod{X} and leaves everything else alone. It is the canonical way to say ``remove this flag and
+touch nothing else''.
+
+\subsection{Shifts (\cod{<<} and \cod{>>})}
+
+Shifting left by $n$ multiplies by $2^n$; shifting right divides. But their most frequent use is
+\emph{placing} and \emph{extracting} fields:
+
+\begin{lstlisting}[style=c]
+/* Placing: build a VGA attribute byte from two 4-bit colours */
+terminal->color = ((uint8_t)background << 4) | (uint8_t)foreground;
+
+/* Extracting: split a virtual address into its three fields */
+uint16_t directory_index = virtual >> 22;            /* bits 31..22 */
+uint16_t table_index     = (virtual >> 12) & 0x3FF;  /* bits 21..12 */
+uint16_t offset          = virtual & 0xFFF;          /* bits 11..0  */
+\end{lstlisting}
+
+\begin{concept}{The language of bits}
+Five idioms cover almost everything: \cod{x | F} sets, \cod{x \&= \textasciitilde F} clears,
+\cod{x \& F} asks, \cod{x \& MASK} trims, \cod{x >> n} extracts. Recognise them on sight and
+systems code stops looking cryptic overnight.
+\end{concept}
+
+\exercise{The physical memory manager keeps one bit per 4 KB page. The function that marks page
+$i$ as used is \cod{bitmap[i / 32] |= (1 << (i \% 32));}. Explain why it divides by 32, and why
+it takes the remainder modulo 32.}
+
+% ============================================================
+\chapter{Inside the x86 processor}
+
+\begin{goals}
+  \item What registers are and what each one is for
+  \item What flags are and why conditional jumps exist
+  \item What privilege rings are (ring 0 and ring 3)
+  \item What the control registers \reg{CR0}, \reg{CR2} and \reg{CR3} do
+\end{goals}
+
+\section{Registers: the processor's own variables}
+
+Memory is huge but slow. Inside the chip itself there are a handful of extremely fast boxes: the
+\hi{registers}. On 32-bit x86 there are eight general-purpose ones, each 32 bits wide.
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Register} & \textbf{Name} & \textbf{Typical use} \\
+\midrule
+\reg{EAX} & Accumulator & Operation results; function return value; \textbf{system call number} \\
+\reg{EBX} & Base        & General purpose; first argument in our system calls \\
+\reg{ECX} & Counter     & Loop counter; second argument in our system calls \\
+\reg{EDX} & Data        & I/O operations (holds the port); third argument \\
+\reg{ESI} & Source      & Source pointer in memory copies \\
+\reg{EDI} & Destination & Destination pointer in memory copies \\
+\reg{EBP} & Base pointer& Marks the start of the current function's frame \\
+\reg{ESP} & Stack pointer & Points at the top of the stack. \textbf{Special: push and pop modify it} \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+The names come from historical convention; apart from \reg{ESP} (and partly \reg{EBP}), the
+processor lets you use them for whatever you like.
+
+\subsection{One register, three names}
+
+For compatibility with processors from the 1970s and 80s, each register can be used whole or in
+pieces:
+
+\begin{center}
+\begin{tikzpicture}[font=\ttfamily\small]
+  \draw[draw=grayborder,fill=accentlight] (0,0) rectangle (8,0.9);
+  \node at (4,0.45) {EAX \ (32 bits)};
+  \draw[draw=grayborder,fill=purplelight] (4,-1.1) rectangle (8,-0.2);
+  \node at (6,-0.65) {AX \ (16 bits)};
+  \draw[draw=grayborder,fill=greenlight] (4,-2.2) rectangle (6,-1.3);
+  \node at (5,-1.75) {AH};
+  \draw[draw=grayborder,fill=amberlight] (6,-2.2) rectangle (8,-1.3);
+  \node at (7,-1.75) {AL};
+  \node[font=\sffamily\scriptsize,text=gray,anchor=west] at (8.3,0.45) {bits 31--0};
+  \node[font=\sffamily\scriptsize,text=gray,anchor=west] at (8.3,-0.65) {bits 15--0};
+  \node[font=\sffamily\scriptsize,text=gray,anchor=west] at (8.3,-1.75) {bits 15--8 and 7--0};
+\end{tikzpicture}
+\end{center}
+
+This explains code that is otherwise baffling. In the bootloader you will see:
+
+\begin{lstlisting}[style=asm]
+mov ah, 0Eh    ; BIOS function: print character
+mov al, 'H'    ; the character to print
+int 10h        ; call the BIOS video service
+\end{lstlisting}
+
+Two different values are being loaded into \emph{two halves of the same register} \reg{AX},
+because that is the interface the BIOS expects.
+
+\section{Flags: the invisible result}
+
+Every arithmetic or logic operation, besides its result, updates a special register called
+\reg{EFLAGS}. Each bit answers a question about what just happened:
+
+\begin{center}
+\begin{tabularx}{0.95\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Flag} & \textbf{Bit} & \textbf{Means} \\
+\midrule
+\reg{ZF} (Zero)      & 6  & The result was exactly zero \\
+\reg{CF} (Carry)     & 0  & There was a carry, or an error; the BIOS uses it to signal failure \\
+\reg{SF} (Sign)      & 7  & The result is negative \\
+\reg{IF} (Interrupt) & 9  & \textbf{Interrupts are enabled} \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+A conditional jump does not look at the result: it looks at the flags. \cod{cmp a, b} internally
+performs a subtraction and throws the result away, keeping only the flags; \cod{je} (``jump if
+equal'') really jumps if \reg{ZF} is set.
+
+\begin{warn}{\reg{IF} and the value \hexa{202}}
+All over the process code you will see \cod{eflags = 0x202}. In binary that is
+\cod{0000 0010 0000 0010}: bit 1 is always set (reserved, the processor requires it) and bit 9 is
+\reg{IF}. So \hexa{202} means ``a clean state \hi{with interrupts enabled}''. If a process
+started with \hexa{002}, it would never yield control back to the scheduler and would hang the
+system.
+\end{warn}
+
+\section{Rings: why not everyone may do everything}
+
+The x86 processor has four privilege levels, called \term{rings}, numbered 0 to 3. In practice
+almost every system uses only two:
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\small]
+  \fill[accentlight,draw=accent] (0,0) circle (2.6);
+  \fill[redlight,draw=red] (0,0) circle (1.3);
+  \node[text=red,font=\sffamily\bfseries\small] at (0,0.15) {Ring 0};
+  \node[text=red,font=\sffamily\scriptsize] at (0,-0.35) {the kernel};
+  \node[text=accent,font=\sffamily\bfseries\small] at (0,2.0) {Ring 3};
+  \node[text=accent,font=\sffamily\scriptsize] at (0,1.6) {the programs};
+
+  \node[align=left,anchor=west,font=\scriptsize,text=gray] at (3.2,1.2)
+    {\textbf{\color{red}Ring 0 may:}\\ run \texttt{cli}, \texttt{lgdt}, \texttt{in}, \texttt{out}\\
+     change \texttt{CR0}/\texttt{CR3}\\ access any page};
+  \node[align=left,anchor=west,font=\scriptsize,text=gray] at (3.2,-1.1)
+    {\textbf{\color{accent}Ring 3 may:}\\ arithmetic, jumps, calls\\ read/write \emph{its own} memory\\
+     and little else};
+\end{tikzpicture}
+\end{center}
+
+If a ring 3 program tries to execute \cod{cli} (disable interrupts), the processor does not run
+it: it raises a \term{general protection fault}, and the kernel decides what to do with that
+program. Usually, kill it.
+
+\begin{concept}{Isolation is not done in software}
+This is the key idea of the whole course. An operating system does not stop a program from doing
+damage by ``watching it'': it \hi{configures the hardware so the program is physically
+incapable of it}. The kernel sets the rules once (in the GDT, in the page tables) and from then on
+the silicon enforces them, at zero cost. If the kernel sets those rules wrongly, the isolation
+simply does not exist.
+\end{concept}
+
+\section{The control registers}
+
+Besides the general-purpose registers, some registers control how the processor operates. This
+course uses three:
+
+\begin{description}
+  \item[CR0] Master switches. Bit 0 (\emph{PE}) turns on protected mode. Bit 31 (\emph{PG}) turns
+    on paging. Setting those two bits, in the right order, is literally the moment the system
+    becomes a modern one.
+  \item[CR2] When a page fault occurs, the processor leaves \emph{the address that was accessed}
+    here. It is the first question any fault handler asks.
+  \item[CR3] Holds the physical address of the active page directory. \hi{Changing
+    \reg{CR3} means changing address space}, which makes it the heart of a context switch.
+\end{description}
+
+\filetag{lytlnybl/memory/vmm.asm}
+\begin{lstlisting}[style=asm]
+set_cr3:
+    mov eax, [esp + 4]
+    mov cr3, eax        ; switch the active address space
+    ret
+
+set_cr0:
+    mov eax, cr0
+    or eax, 0x80000000  ; bit 31 = PG: enable paging
+    mov cr0, eax
+    ret
+\end{lstlisting}
+
+Three instructions. With them, the processor stops seeing physical memory directly and starts
+seeing a translated world. Part VIII explains what that means.
+
+\exercise{Why do you think \reg{CR3} holds a \emph{physical} address rather than a virtual one?
+Think about what would happen if the processor had to translate the address of the page directory
+using the page directory itself.}
+
+% ============================================================
+\chapter{The memory of a PC}
+
+\begin{goals}
+  \item How the stack works and why it grows downwards
+  \item What a stack frame is, and exactly what happens on a function call
+  \item How a PC's memory is laid out at boot
+  \item What a stack overflow is and why it is so destructive
+\end{goals}
+
+\section{The stack}
+
+The \term{stack} is a region of memory with a very simple discipline: the last thing you put in is
+the first thing you take out. The processor supports it directly with two instructions:
+
+\begin{itemize}
+  \item \cod{push value}: subtracts 4 from \reg{ESP} and writes the value there.
+  \item \cod{pop dest}: reads the value at \reg{ESP} and adds 4 to \reg{ESP}.
+\end{itemize}
+
+Notice the crucial detail: \hi{\cod{push} subtracts}. The stack grows towards \emph{lower}
+addresses. It is a historical convention with an enormous practical consequence: if you place the
+stack just above your data, growing it overwrites them.
+
+\begin{center}
+\begin{tikzpicture}[font=\ttfamily\scriptsize]
+  \draw[draw=grayborder] (0,0) rectangle (3.4,4.6);
+  \node[font=\sffamily\scriptsize,text=gray] at (1.7,4.85) {high addresses};
+  \node[font=\sffamily\scriptsize,text=gray] at (1.7,-0.3) {low addresses};
+
+  \fill[graylight] (0,3.6) rectangle (3.4,4.6);
+  \node[font=\sffamily\scriptsize,text=gray] at (1.7,4.1) {(unused)};
+
+  \fill[accentlight] (0,2.6) rectangle (3.4,3.6);
+  \node at (1.7,3.1) {0x00000042};
+  \fill[accentlight] (0,1.6) rectangle (3.4,2.6);
+  \node at (1.7,2.1) {0x0000ABCD};
+  \fill[accentlight] (0,0.6) rectangle (3.4,1.6);
+  \node at (1.7,1.1) {0x00009000};
+
+  \draw[draw=grayborder] (0,0.6) -- (3.4,0.6);
+  \node[font=\sffamily\scriptsize,text=gray] at (1.7,0.3) {free space};
+
+  \draw[-{Stealth[length=2.5mm]},thick,red] (4.6,1.1) -- (3.5,1.1);
+  \node[anchor=west,font=\sffamily\scriptsize,text=red] at (4.7,1.1) {ESP};
+  \draw[-{Stealth[length=2.5mm]},thick,accent] (1.7,-0.75) -- (1.7,0.35);
+  \node[anchor=north,font=\sffamily\scriptsize,text=accent] at (1.7,-0.8) {grows this way};
+\end{tikzpicture}
+\end{center}
+
+\subsection{What happens on a function call}
+
+When code executes \cod{call my\_function}, this happens:
+
+\begin{enumerate}
+  \item The arguments are pushed onto the stack (on 32-bit x86, right to left).
+  \item \cod{call} pushes the \hi{return address}: the address of the following instruction.
+        Then it jumps.
+  \item The function pushes \reg{EBP} and does \cod{mov ebp, esp}, so \reg{EBP} stays fixed at the
+        start of its frame while \reg{ESP} keeps moving.
+  \item The function subtracts from \reg{ESP} to reserve its local variables.
+  \item On return, \cod{leave} undoes the above and \cod{ret} pops the return address and jumps to
+        it.
+\end{enumerate}
+
+\begin{lstlisting}[style=asm]
+vga_text_writeline:
+    push ebp            ; save the previous frame
+    mov  ebp, esp       ; establish the new frame
+    sub  esp, 8         ; reserve 8 bytes of locals
+    ; ... body of the function ...
+    leave               ; mov esp,ebp ; pop ebp
+    ret                 ; jump to the return address
+\end{lstlisting}
+
+\begin{danger}{Why a stack overflow is catastrophic}
+The return address lives \emph{on the stack}, among the data. If a function writes past the end of
+a local array, it clobbers that address. When the \cod{ret} arrives, the processor jumps to
+whatever that corrupted value says: usually, nowhere.
+
+In a normal program that produces a segmentation fault and the operating system kills it.
+\hi{In a kernel there is nobody above to do the killing.} The processor tries to execute
+garbage, faults, tries to handle the fault, faults again, and on the third failure it resets
+itself. Part XIII walks through a real case of exactly this, step by step.
+\end{danger}
+
+\section{The memory map of a PC}
+
+When the system boots, memory is neither empty nor uniform. There are regions reserved for
+historical reasons going back to 1981:
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize,x=1cm,y=1cm]
+  \def\w{7.2}
+  \newcommand{\banda}[5]{%
+    \fill[#4,draw=grayborder] (0,#1) rectangle (\w,#2);
+    \node[align=center,font=\sffamily\scriptsize] at (\w/2,{(#1+#2)/2}) {#3};
+    \node[anchor=west,font=\ttfamily\tiny,text=gray] at (\w+0.15,#1) {#5};
+  }
+  \banda{0}{0.7}{Interrupt vector table and BIOS data}{amberlight}{0x00000}
+  \banda{0.7}{1.5}{\textbf{Free memory} \\ {\tiny the kernel is loaded here (0x9000)}}{greenlight}{0x00500}
+  \banda{1.5}{2.1}{Boot sector area {\tiny (0x7C00)}}{purplelight}{0x07C00}
+  \banda{2.1}{3.0}{\textbf{Free memory} \\ {\tiny E820 map at 0x5000, bitmap at 0x100000}}{greenlight}{0x07E00}
+  \banda{3.0}{3.7}{Video memory {\tiny (text at 0xB8000)}}{accentlight}{0xA0000}
+  \banda{3.7}{4.4}{BIOS and option ROMs}{graylight}{0xC0000}
+  \banda{4.4}{5.6}{\textbf{Extended memory} \\ {\tiny all modern RAM lives here}}{greenlight}{0x100000}
+  \node[anchor=west,font=\ttfamily\tiny,text=gray] at (\w+0.15,5.6) {0xFFFFFFFF};
+\end{tikzpicture}
+\end{center}
+
+The holes in that list matter: if the memory manager hands out a page that is really video memory,
+the system starts writing data and strange symbols appear on screen. Worse: if it hands out a page
+holding its own code, it overwrites itself.
+
+\begin{concept}{This is why E820 exists}
+Since the real map depends on the machine, the BIOS offers a service (function \hexa{E820}) that
+returns a list of regions: address, size and type (1 = usable, anything else = do not touch). The
+lytlnyblOS bootloader asks for that list and stores it at \hexa{5000} so the kernel can read it
+later. You will see that code in Chapter 12.
+\end{concept}
+
+\exercise{Looking at the map, why do you think the boot sector is loaded at \hexa{7C00} rather
+than at \hexa{0}? Hint: look at what lives at \hexa{0}, and how much room is left above
+\hexa{7C00} before the next reserved block.}
+
+% ============================================================
+\chapter{Talking to hardware}
+
+\begin{goals}
+  \item How \cod{in} and \cod{out} are implemented and called from C
+  \item Why you sometimes have to wait for hardware
+  \item What polling is and why it is a bad long-term idea
+\end{goals}
+
+\section{The port functions}
+
+All conversation with devices goes through four tiny assembly functions, because C has no way to
+express the \cod{in} and \cod{out} instructions.
+
+\filetag{lytlnybl/kernel/interrupts.asm}
+\begin{lstlisting}[style=asm]
+outb:                       ; void outb(uint16_t port, uint8_t value)
+    mov al, [esp + 8]
+    mov dx, [esp + 4]
+    out dx, al
+    ret
+
+inb:                        ; uint8_t inb(uint16_t port)
+    mov dx, [esp + 4]
+    in  al, dx              ; the result lands in AL, and AL is part of EAX,
+    ret                     ; which is where C expects a return value
+\end{lstlisting}
+
+The \cod{inb} detail is worth pausing on: there is no instruction that ``returns'' a value. The C
+calling convention simply says the return value travels in \reg{EAX}, and \cod{in al, dx} already
+leaves the byte in \reg{AL}, the low byte of \reg{EAX}. The function works by construction.
+
+The 16-bit versions (\cod{inw}/\cod{outw}) are identical with \reg{AL} replaced by \reg{AX}, and
+are used for the disk, which transfers two bytes at a time.
+
+\section{Waiting for hardware}
+
+Devices are vastly slower than the processor. Send two commands back to back to an old chip and
+the second may arrive before it has digested the first. There are two ways to deal with that.
+
+\subsection{A blind pause}
+
+\begin{lstlisting}[style=asm]
+io_wait:
+    out 0x80, al    ; write to a port that does nothing
+    ret             ; the bus round trip burns the time we need
+\end{lstlisting}
+
+Port \hexa{80} is connected to nothing useful on a PC. Writing to it has no effect, but the bus
+cycle takes long enough (a few microseconds) to give a slow chip time to catch up. It is an old,
+ugly, perfectly effective trick. It is used when reprogramming the interrupt controller.
+
+\subsection{Asking until it is ready}
+
+The disk is more sophisticated: it has a status register you can poll.
+
+\filetag{lytlnybl/kernel/drivers/ata.c}
+\begin{lstlisting}[style=c]
+static void ata_wait_bsy() {
+  uint8_t status;
+  do {
+    status = inb(ATA_STATUS);
+  } while (status & ATA_STATUS_BSY);   /* spin until it stops being busy */
+}
+\end{lstlisting}
+
+This is \term{polling}: asking in a loop. It is simple and correct, but while the loop spins
+\hi{the processor does nothing else}. During a disk read the whole system is frozen.
+
+\begin{warn}{Polling versus interrupts}
+The alternative is to ask the device to \emph{signal} when it finishes, via an interrupt, and run
+another process meanwhile. That is what real systems do, and it is considerably more complex.
+lytlnyblOS uses interrupts for keyboard and timer but polling for disk: a very typical mix in
+small systems. It is a conscious trade-off, not an oversight.
+\end{warn}
+
+\begin{summary}
+You now have the vocabulary of the machine: registers, flags, stack, addresses, ports and rings.
+Part II steps up a level and answers the underlying question: given that hardware, what exactly
+must an operating system contribute, and why?
+\end{summary}

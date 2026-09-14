@@ -1,0 +1,332 @@
+\part{The shell}
+
+\chapter{The read-eval-print loop}
+
+\begin{goals}
+  \item How a command interpreter is structured
+  \item Follow a command from keystroke to effect
+  \item See how every subsystem in the course is used at once
+\end{goals}
+
+\section{The whole program}
+
+\filetag{lytlnybl/user/programs/shell.c}
+\begin{lstlisting}[style=c]
+void start(void) {
+  for (;;) {
+    printf("> ");                       /* Print the prompt */
+
+    char input[50];
+    read(0, input, 50);                 /* Read */
+    input[strlen(input) - 1] = '\0';
+
+    size_t word_count;
+    char** words = tokenize_line(input, &word_count);   /* Eval */
+
+    if (!execute_command(words, word_count)) {
+      printf("command failed\n");
+    }
+
+    memset(input, 0, strlen(input));    /* Loop */
+    word_count = 0;
+    free(words);
+  }
+}
+\end{lstlisting}
+
+That is a \term{REPL}: Read, Eval, Print, Loop. Every interactive interpreter ever written --- bash,
+Python, a database console --- has this shape.
+
+\begin{concept}{Everything you built, in eleven lines}
+Look at what those lines depend on:
+\begin{itemize}
+  \item \cod{printf} $\rightarrow$ \cod{write} $\rightarrow$ \cod{int 0x80} $\rightarrow$ the IDT
+        $\rightarrow$ the VGA driver.
+  \item \cod{read} $\rightarrow$ the process blocks $\rightarrow$ the scheduler switches away
+        $\rightarrow$ a key arrives $\rightarrow$ IRQ1 $\rightarrow$ the keyboard driver writes into
+        another address space $\rightarrow$ the process is woken.
+  \item \cod{malloc} inside \cod{tokenize\_line} $\rightarrow$ \cod{sbrk} $\rightarrow$ the kernel
+        maps a page $\rightarrow$ \cod{alloc\_frame}.
+  \item \cod{execute\_command} $\rightarrow$ filesystem calls $\rightarrow$ path resolution
+        $\rightarrow$ inodes $\rightarrow$ the ATA driver $\rightarrow$ I/O ports.
+\end{itemize}
+Every part of this course is exercised by one iteration of this loop.
+\end{concept}
+
+\section{Tokenising}
+
+\filetag{lytlnybl/user/programs/shell.c}
+\begin{lstlisting}[style=c]
+char** tokenize_line(const char* line, size_t *count_out) {
+  const char* p = line;
+  char **words;
+  size_t words_i = 0;
+  size_t capacity = 8;
+
+  words = calloc(capacity + 1, sizeof(char *));
+
+  while (*p != '\0') {
+    (*count_out)++;
+    const char* start;
+
+    while (isspace((unsigned char) *p)) p++;
+    if (*p == '\0') break;
+
+    start = p;
+    while (*p != '\0' && !isspace((unsigned char) *p)) p++;
+
+    size_t len = p - start;
+    char *word = malloc(len + 1);
+    if (word == NULL) return NULL;
+
+    memcpy(word, start, len);
+    word[len] = '\0';
+    words[words_i++] = word;
+  }
+  return words;
+}
+\end{lstlisting}
+
+The algorithm is right: skip whitespace, mark the start, advance to the next whitespace, copy the
+slice. But the bookkeeping around it has three genuine defects.
+
+\begin{danger}{Three bugs in the word counter}
+\textbf{1. \cod{word\_count} is never initialised.} In \cod{start()} it is declared as
+\cod{size\_t word\_count;} and passed by address. \cod{tokenize\_line} then does
+\cod{(*count\_out)++} on whatever garbage was on the stack. Since \cod{execute\_command} tests
+\cod{word\_count != 2}, the shell's behaviour depends on an indeterminate value.
+
+It works in practice only because the stack slot happens to be zero on the first iteration and the
+variable is reset to 0 at the end of each loop --- which is itself an accident, because the reset
+happens \emph{after} the value has already been used.
+
+\textbf{2. The increment is in the wrong place.} \cod{(*count\_out)++} runs at the top of the loop,
+before checking whether a token actually exists. A trailing space makes the loop run one extra time
+and count a word that was never produced.
+
+\textbf{3. \cod{capacity} is never enforced.} The array holds 9 pointers. A line with 12 words
+writes past the end of a heap allocation, corrupting the next block's header --- which, per Chapter
+29, corrupts the allocator itself.
+\end{danger}
+
+\begin{warn}{And a leak}
+\cod{start()} calls \cod{free(words)}, which releases the array of pointers --- but every string
+inside it was separately \cod{malloc}ed and is never freed. Each command leaks a few dozen bytes.
+With a 4 KB heap that grows by \cod{sbrk}, the shell slowly consumes memory for as long as it runs.
+
+The correct cleanup is a loop:
+\begin{lstlisting}[style=c]
+for (size_t i = 0; i < word_count; i++) free(words[i]);
+free(words);
+\end{lstlisting}
+\end{warn}
+
+\begin{concept}{Why none of this is surprising}
+These are not sloppy mistakes; they are the normal state of code that has not yet been stress
+tested. The shell is the last thing built in the project, it works for the inputs it was tried with,
+and the bugs only appear at the edges: an empty line, a trailing space, twelve words, a long
+session.
+
+The lesson worth taking is the one about \emph{compiler help}. Note that \cod{-Wall -Wextra} does
+\textbf{not} catch the uninitialised \cod{word\_count}, because its address is taken --- GCC gives
+up on tracking it. Some bugs need tools beyond warnings: a sanitiser, a unit test, or simply trying
+the edge cases deliberately.
+\end{concept}
+
+\section{Executing}
+
+\filetag{lytlnybl/user/programs/shell.c}
+\begin{lstlisting}[style=c]
+bool execute_command(char** words, size_t word_count) {
+  if (word_count != 2) return false;      /* every command takes exactly one argument */
+
+  int fd;
+
+  if      (strcmp(words[0], "ls")    == 0) fs_ops(FS_LS,    words[1]);
+  else if (strcmp(words[0], "mkdir") == 0) fs_ops(FS_MKDIR, words[1]);
+  else if (strcmp(words[0], "touch") == 0) fs_ops(FS_TOUCH, words[1]);
+  else if (strcmp(words[0], "rm")    == 0) fs_ops(FS_RM,    words[1]);
+  else if (strcmp(words[0], "run")   == 0) fs_ops(FS_RUN,   words[1]);
+  else if (strcmp(words[0], "cat")   == 0) { /* ... */ }
+  else if (strcmp(words[0], "write") == 0) { /* ... */ }
+  else return false;
+
+  return true;
+}
+\end{lstlisting}
+
+\begin{warn}{Exactly two words, always}
+\cod{if (word\_count != 2) return false;} means every command must have exactly one argument. So
+\cod{ls} alone fails; you must type \cod{ls /}. There is no way to implement a zero-argument command
+such as \cod{help} or \cod{exit} without changing this line.
+
+Combined with the uninitialised counter above, this is why the shell can behave differently between
+runs.
+\end{warn}
+
+\begin{recipe}{adding commands to the shell}{ch40-shell-command}
+Adds \cod{echo} and \cod{rev} as two more branches in \cod{execute\_command} --- which is all a new
+command is. Boot it and type \cod{echo hello} or \cod{rev lytlnybl}.
+
+It also adds \cod{help}, deliberately, to show what the \cod{word\_count != 2} rule costs: the
+command exists and works, but only if you type \cod{help} followed by a second word, because
+anything that is not exactly two words is rejected before the branches are ever reached.
+\end{recipe}
+
+\section{\cod{cat}: reading a file}
+
+\begin{lstlisting}[style=c]
+else if (strcmp(words[0], "cat") == 0) {
+    fd = open(words[1]);
+    if (fd < 0) return false;
+
+    char buffer[128];
+    int n;
+
+    while ((n = read(fd, buffer, sizeof(buffer))) > 0) {
+      write(1, buffer, n);
+    }
+    printf("\n");
+    close(fd);
+}
+\end{lstlisting}
+
+This is the canonical Unix read loop, and it is correct in shape: read a chunk, write exactly what
+was read, stop at zero.
+
+\begin{danger}{But it triggers the kernel bug from Chapter 34}
+\cod{write(1, buffer, n)} with \cod{n} up to 128 --- and the kernel's write handler does
+\cod{((char*)buffer)[count] = '\textbackslash 0';}. For a file whose content fills the buffer
+exactly, the kernel writes a zero byte to \cod{buffer[128]}, one past the end of a 128-byte local
+array on the user's stack.
+
+Two bugs meeting: a kernel that writes out of bounds and a caller that uses the full buffer. Either
+one alone would be harmless. This is how real security holes are made.
+\end{danger}
+
+\section{\cod{write}: the growing buffer}
+
+\begin{lstlisting}[style=c]
+size_t capacity = 128;
+size_t length = 0;
+char* buffer = malloc(capacity);
+
+while (true) {
+    char input[128];
+    int n = read(0, input, sizeof(input));
+
+    if (n < 0) { free(buffer); close(fd); return false; }
+    if (n == 0) break;
+
+    if (length + n > capacity) {
+        while (length + n > capacity) capacity *= 2;
+        char *new_buffer = realloc(buffer, capacity);
+        if (new_buffer == NULL) { free(buffer); close(fd); return false; }
+        buffer = new_buffer;
+    }
+
+    memcpy(buffer + length, input, n);
+    length += n;
+
+    if (input[n-1] == '\n') break;
+}
+\end{lstlisting}
+
+This one is genuinely well written, and it is worth saying so. It doubles capacity rather than
+growing by a constant (amortised $O(1)$ per byte). It checks \cod{realloc} for failure. It keeps
+the old pointer until the new allocation succeeds, so a failure does not leak. It frees and closes
+on every error path.
+
+That the same file contains both this and \cod{tokenize\_line} is a good illustration of how code
+quality varies within a project depending on how much thought a particular function received.
+
+\section{\cod{run}: starting another program}
+
+\filetag{lytlnybl/kernel/interrupts.c}
+\begin{lstlisting}[style=c]
+case FS_RUN: {
+    process_t* child = load_program(path);
+
+    child->parent_pid = current_process->pid;
+
+    current_process->pid_waiting_for = child->pid;
+    current_process->state = PROCESS_BLOCKED;
+    context_switch(current_process, get_next_process(), regs);
+    break;
+}
+\end{lstlisting}
+
+And the other half, in \cod{exit}:
+
+\begin{lstlisting}[style=c]
+case SYSCALL_EXIT: {
+    process_t* parent = find_process_by_pid(current_process->parent_pid);
+
+    if (parent != NULL && parent->pid_waiting_for == current_process->pid) {
+        parent->pid_waiting_for = 0;
+        parent->state = PROCESS_READY;      /* wake the shell */
+    }
+
+    current_process->state = PROCESS_TERMINATED;
+    context_switch(current_process, get_next_process(), regs);
+    break;
+}
+\end{lstlisting}
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize,
+  n/.style={draw=grayborder,rounded corners=2pt,minimum width=4.6cm,minimum height=0.6cm,align=left,inner xsep=7pt}]
+  \node[n,fill=greenlight,draw=green] (a) {shell: \texttt{fs\_ops(FS\_RUN, "/bin/user\_test")}};
+  \node[n,fill=redlight,draw=red,below=0.22cm of a] (b) {kernel: \texttt{load\_program} creates the child};
+  \node[n,fill=redlight,draw=red,below=0.22cm of b] (c) {kernel: child.parent\_pid = shell.pid};
+  \node[n,fill=amberlight,draw=amber,below=0.22cm of c] (d) {kernel: shell $\rightarrow$ BLOCKED, switch away};
+  \node[n,fill=purplelight,draw=purple,below=0.22cm of d] (e) {child runs, prints, calls \texttt{exit()}};
+  \node[n,fill=redlight,draw=red,below=0.22cm of e] (f) {kernel: finds the parent, sets it READY};
+  \node[n,fill=greenlight,draw=green,below=0.22cm of f] (g) {shell resumes, prints the prompt};
+  \foreach \x/\y in {a/b,b/c,c/d,d/e,e/f,f/g} \draw[-{Stealth[length=2mm]},gray] (\x)--(\y);
+\end{tikzpicture}
+\end{center}
+
+\begin{concept}{This is \cod{fork} + \cod{exec} + \cod{wait}, collapsed into one}
+Unix separates these into three system calls, which is more flexible --- it lets the shell set up
+redirection between forking and exec'ing. lytlnyblOS merges them, which is much simpler and enough
+for \cod{run}.
+
+The blocking-and-waking mechanism, though, is exactly the real thing: the parent records which child
+it waits for, goes to sleep, and the child's exit path wakes it. That handshake is the heart of
+process management in every Unix.
+\end{concept}
+
+\begin{tryit}[The full round trip, verified]
+On a running system:
+\begin{lstlisting}[style=txt]
+> run /bin/user_test
+ab
+i have a number it is: 314
+malloc: hi
+calloc: abc
+realloc: hellooo
+>
+\end{lstlisting}
+The child ran, exercised \cod{printf}, \cod{malloc}, \cod{calloc} and \cod{realloc} in user space,
+exited, and the shell got its prompt back. Every mechanism in Parts IX through XII, working
+together.
+\end{tryit}
+
+\begin{danger}{Unless the file does not exist}
+Type a path that does not exist --- a typo is enough --- and the missing NULL check from Chapter 33
+fires:
+\begin{lstlisting}[style=txt]
+> run /bin/usertest
+(nothing. the prompt never returns. further typing echoes but does nothing.)
+\end{lstlisting}
+The shell is blocked waiting for a child that was never created, with a pid read out of memory near
+address zero. Nothing will ever wake it. This is reproducible on the current code and is the single
+easiest serious bug in the project to fix.
+\end{danger}
+
+\begin{summary}
+The system is complete: it boots, protects itself, manages memory, runs isolated programs,
+stores files and gives you a command line. The last part steps back and looks at it as an engineer
+rather than a student.
+\end{summary}

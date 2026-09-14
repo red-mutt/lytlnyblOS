@@ -1,0 +1,462 @@
+\part{Processes and scheduling}
+
+\chapter{What a process is}
+
+\begin{goals}
+  \item The difference between a program and a process
+  \item What context is and why it must be saved completely
+  \item What information the process control block holds
+\end{goals}
+
+\section{Program versus process}
+
+A \term{program} is a passive thing: bytes on a disk. A \term{process} is a program \emph{running},
+plus everything that describes the state of that execution.
+
+Run the same program twice and you get two processes. They share not a single byte of state: two
+different stacks, two different heaps, two different sets of register values, two different
+positions in the code. The program is a recipe; the process is a particular meal being cooked.
+
+\begin{concept}{Context}
+The \term{context} of a process is everything that must be saved and restored so that it can be
+stopped and resumed without noticing. For a 32-bit x86 process that is:
+\begin{itemize}
+  \item the eight general-purpose registers,
+  \item \reg{EIP}: where it was executing,
+  \item \reg{EFLAGS}: its flag state,
+  \item \reg{ESP} and \reg{SS}: its stack,
+  \item \reg{CS} and \reg{DS}: its segments, which encode its privilege,
+  \item \reg{CR3}: its address space.
+\end{itemize}
+Forget \emph{any} of these and the process resumes subtly wrong --- a comparison behaves
+backwards, a pointer aims at nothing, a return goes to the wrong place. Context switching bugs are
+notoriously hard to find precisely because the symptom appears long after the cause.
+\end{concept}
+
+\section{The process control block}
+
+All of that lives in one structure, conventionally called the PCB:
+
+\filetag{lytlnybl/include/tasks/procman.h}
+\begin{lstlisting}[style=c]
+typedef struct process {
+    uint32_t pid_waiting_for;   /* pid of a child we are waiting on */
+    uint32_t parent_pid;
+
+    uintptr_t user_heap_end;    /* for sbrk */
+    uint32_t heap_pages_allocated;
+
+    uint32_t wake_tick;         /* for sleep */
+    process_reading_state_t reading_state;  /* for a blocked read */
+
+    uint32_t pid;
+    process_registers_t regs;   /* THE CONTEXT */
+
+    process_states_t state;
+    process_type_t type;        /* kernel or user */
+
+    struct process* next;       /* singly linked list */
+
+    page_directory_t* page_directory;
+
+    void* kstack;               /* kernel stack */
+    void* ustack;               /* user stack */
+} __attribute__((packed)) process_t;
+\end{lstlisting}
+
+\begin{warn}{\cod{packed} does not belong here}
+\cod{\_\_attribute\_\_((packed))} is correct on structures that mirror a hardware layout --- the
+TSS, GDT entries, filesystem records. \cod{process\_t} is purely internal: nothing outside the
+kernel ever sees its byte layout.
+
+Packing it forces unaligned field access, which is slower on x86 and would fault outright on ARM or
+MIPS. It also makes taking a pointer to a field technically undefined behaviour. Removing
+\cod{packed} here would be a small, safe improvement.
+\end{warn}
+
+\section{The five states}
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize,
+  s/.style={draw=accent,fill=accentlight,rounded corners=3pt,minimum width=2.3cm,minimum height=0.9cm,align=center},
+  a/.style={-{Stealth[length=2.2mm]},thick}]
+
+  \node[s,fill=greenlight,draw=green] (run) at (0,0) {RUNNING};
+  \node[s] (rdy) at (-4.4,0) {READY};
+  \node[s,fill=amberlight,draw=amber] (blk) at (0,-2.4) {BLOCKED};
+  \node[s,fill=purplelight,draw=purple] (slp) at (4.4,0) {SLEEPING};
+  \node[s,fill=redlight,draw=red] (trm) at (0,2.4) {TERMINATED};
+
+  \draw[a,green] (rdy) to[bend left=18] node[above,font=\tiny,text=gray]{scheduler picks it} (run);
+  \draw[a,accent] (run) to[bend left=18] node[below,font=\tiny,text=gray]{time slice ends} (rdy);
+  \draw[a,amber] (run) -- node[right,font=\tiny,text=gray]{read() with no data} (blk);
+  \draw[a,amber] (blk) to[bend right=45] node[left,font=\tiny,text=gray]{key arrives} (rdy);
+  \draw[a,purple] (run) -- node[above,font=\tiny,text=gray]{sleep(n)} (slp);
+  \draw[a,purple] (slp) to[bend right=45] node[above,font=\tiny,text=gray]{timer expires} (rdy);
+  \draw[a,red] (run) -- node[right,font=\tiny,text=gray]{exit() or fault} (trm);
+\end{tikzpicture}
+\end{center}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{State} & \textbf{Meaning} \\
+\midrule
+\cod{RUNNING}    & Executing right now. Exactly one process is in this state \\
+\cod{READY}      & Could run; waiting for its turn \\
+\cod{BLOCKED}    & Waiting for an event: a keystroke, a child exiting \\
+\cod{SLEEPING}   & Waiting for a specific time to arrive \\
+\cod{TERMINATED} & Finished; its resources have not been reclaimed yet \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+The distinction between \cod{BLOCKED} and \cod{SLEEPING} is worth noting: a sleeping process is
+woken by the timer, which knows exactly when; a blocked process is woken by whichever subsystem it
+was waiting on, which does not know when. They are handled in different places --- sleeping in
+\cod{timer\_handler}, blocked in \cod{keyboard\_handler} or in the \cod{exit} system call.
+
+\section{Creating a process}
+
+\filetag{lytlnybl/tasks/procman.c}
+\begin{lstlisting}[style=c]
+process_t* create_process(void* task_address, process_type_t type) {
+    process_t* new_process = kmalloc(sizeof(process_t));
+
+    new_process->wake_tick = 0;
+    new_process->type = type;
+    new_process->pid = next_pid++;
+    new_process->state = PROCESS_READY;
+    new_process->kstack = kmalloc(KERNEL_STACK_SIZE);   /* 16 KB */
+    new_process->next = NULL;
+
+    new_process->regs.eax = 0;  /* ... all registers zeroed ... */
+    new_process->regs.eip = (uintptr_t)task_address;
+    new_process->regs.eflags = 0x202;   /* interrupts enabled! */
+
+    if (type == PROCESS_KERNEL) create_kprocess(new_process);
+    else                        create_uprocess(new_process);
+
+    /* append to the end of the list */
+    process_t* traversal_process = process_head;
+    while (traversal_process) {
+        if (!traversal_process->next) {
+            traversal_process->next = new_process;
+            break;
+        }
+        traversal_process = traversal_process->next;
+    }
+    return new_process;
+}
+\end{lstlisting}
+
+\begin{concept}{The process has not run yet, but its context already exists}
+This is the elegant part. The new process is given a \emph{fabricated} context: registers at zero,
+\reg{EIP} at its entry point, flags with interrupts on, a fresh stack pointer.
+
+Nothing distinguishes that fabricated state from one produced by genuinely interrupting a running
+process. So the scheduler needs no special ``start'' path: it simply restores this context like any
+other, \cod{iret} runs, and the process begins. \hi{Starting a process and resuming one are
+the same operation.}
+\end{concept}
+
+\subsection{Kernel processes versus user processes}
+
+\begin{lstlisting}[style=c]
+void create_kprocess(process_t* new_process) {
+    new_process->regs.esp = (uint32_t)(new_process->kstack) + KERNEL_STACK_SIZE;
+    new_process->regs.cs = 0x08;    /* kernel code, ring 0 */
+    new_process->regs.ds = 0x10;    /* kernel data */
+    new_process->regs.ss = 0x10;
+    new_process->page_directory = kernel_directory;   /* shares the kernel's space */
+}
+\end{lstlisting}
+
+A kernel process runs in ring 0, in the kernel's own address space, on a heap-allocated stack. It is
+essentially a thread. Note \cod{esp} points at the \emph{end} of the allocation, because the stack
+grows down.
+
+A user process, by contrast, gets its own page directory, its own stack mapped at
+\hexa{BFFFF000}, its own heap, and ring 3 selectors. Part X covers it.
+
+% ============================================================
+\begin{recipe}{creating kernel processes}{ch30-kernel-process}
+Creates two kernel processes that do nothing but increment a counter, then prints both counters six
+times from the main kernel process. All three advance, and none of them yields: the timer takes the
+CPU away regardless. That is preemption, in about twenty lines.
+
+The comments state the two rules for a kernel process: it must never return, because there is no
+return address on its stack, and it cannot call \cod{sleep()} or \cod{exit()}, because those are
+system calls and it is already inside the kernel.
+\end{recipe}
+
+% ============================================================
+\chapter{Context switching}
+
+\begin{goals}
+  \item Understand how a process is swapped for another
+  \item See why the interrupt stack frame is the key to the whole mechanism
+  \item Know what the TSS has to do with it
+\end{goals}
+
+\section{The idea}
+
+Recall from Chapter 21 that the interrupt stub passes C a pointer to the interrupted code's complete
+saved state, and that \cod{iret} restores whatever that structure contains.
+
+A context switch therefore needs no special machinery at all:
+
+\begin{enumerate}
+  \item Copy the current contents of \cod{registers\_t} into the current process's PCB.
+  \item Copy the \emph{new} process's PCB into that same \cod{registers\_t}.
+  \item Change \reg{CR3} to the new process's page directory.
+  \item Return normally. \cod{iret} resumes the new process.
+\end{enumerate}
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize,
+  b/.style={draw=grayborder,rounded corners=3pt,minimum width=2.9cm,minimum height=2.0cm,align=center}]
+  \node[b,fill=greenlight,draw=green] (a) at (0,0) {\textbf{PCB of A}\\{\tiny eip, esp, eax\ldots}};
+  \node[b,fill=amberlight,draw=amber] (s) at (5,0) {\textbf{registers\_t}\\{\tiny on the kernel stack}};
+  \node[b,fill=purplelight,draw=purple] (c) at (10,0) {\textbf{PCB of B}\\{\tiny eip, esp, eax\ldots}};
+
+  \draw[-{Stealth[length=2.5mm]},green,thick] (s) to[bend right=25] node[below,font=\tiny]{1. save\_context} (a);
+  \draw[-{Stealth[length=2.5mm]},purple,thick] (c) to[bend right=25] node[below,font=\tiny]{2. load\_context} (s);
+  \draw[-{Stealth[length=2.5mm]},red,thick] (5,-1.6) -- (5,-2.6) node[below,font=\tiny,text=red]{3. iret runs B};
+\end{tikzpicture}
+\end{center}
+
+\section{The code}
+
+\filetag{lytlnybl/tasks/context.c}
+\begin{lstlisting}[style=c]
+void context_switch(process_t* old_process, process_t* new_process,
+                    registers_t* regs) {
+    current_process = new_process;
+
+    if (old_process->state == PROCESS_RUNNING) {
+        old_process->state = PROCESS_READY;
+    }
+
+    save_context(old_process, regs);
+    new_process->state = PROCESS_RUNNING;
+
+    return_to_user = (new_process->type == PROCESS_USER);
+
+    if (new_process->type == PROCESS_USER) {
+        tss.esp0 = (uintptr_t)(new_process->kstack) + KERNEL_STACK_SIZE;
+        set_cr3((uintptr_t)new_process->page_directory);
+    } else if (new_process->type == PROCESS_KERNEL) {
+        set_cr3((uintptr_t)kernel_directory);
+    }
+
+    if (old_process->state == PROCESS_TERMINATED) {
+        destroy_process(old_process);
+    }
+
+    load_context(new_process, regs);
+}
+\end{lstlisting}
+
+\subsection{Why the state is checked before overwriting it}
+
+The first \cod{if} only demotes \cod{RUNNING} to \cod{READY}. That matters: if the process arrived
+here because it called \cod{exit} (state \cod{TERMINATED}), or because it blocked on a read (state
+\cod{BLOCKED}), or because it slept, that state must be preserved. Unconditionally setting
+\cod{READY} would make a blocked process immediately runnable again, and the \cod{read} would return
+garbage.
+
+\subsection{Saving the stack correctly}
+
+\filetag{lytlnybl/tasks/context.c}
+\begin{lstlisting}[style=c]
+void save_context(process_t* process, registers_t* regs) {
+    process->regs.eip = regs->eip;
+    process->regs.cs  = regs->cs;
+    process->regs.eflags = regs->eflags;
+    process->regs.ds  = regs->ds;
+    /* ... the eight general-purpose registers ... */
+
+    if (process->type == PROCESS_KERNEL) {
+        process->regs.esp = regs->esp;        /* from pusha */
+    } else {
+        process->regs.esp = regs->user_esp;   /* pushed by the processor */
+        process->regs.ss  = regs->ss;
+    }
+}
+\end{lstlisting}
+
+This is the conditional from Chapter 21 made concrete. For a kernel process there was no ring change,
+so the only \reg{ESP} available is the one \cod{pusha} saved. For a user process the processor
+pushed the real user \reg{ESP} and \reg{SS} onto the kernel stack, and those are the ones that
+matter --- the \cod{pusha} value is the kernel stack pointer, which is meaningless to the user
+program.
+
+\begin{danger}{Getting this backwards}
+Save \cod{regs->esp} for a user process and on resumption it would run with a \emph{kernel} stack
+pointer while in ring 3. The first push would fault --- or worse, if that address happened to be
+mapped user-accessible, it would silently corrupt kernel memory. This is exactly the class of bug
+that appears ``randomly'', hours later, in an unrelated subsystem.
+\end{danger}
+
+\subsection{\cod{tss.esp0}: preparing for the next interrupt}
+
+\begin{lstlisting}[style=c]
+tss.esp0 = (uintptr_t)(new_process->kstack) + KERNEL_STACK_SIZE;
+\end{lstlisting}
+
+When a ring 3 process is interrupted, the processor reads \cod{esp0} from the TSS and switches to
+that stack automatically. So before running a user process, the kernel must point \cod{esp0} at
+\emph{that process's} kernel stack.
+
+Forget this line and every process would share one kernel stack: a nested interrupt would clobber
+another process's saved state. Part X returns to the TSS in detail.
+
+\section{The scheduler}
+
+\filetag{lytlnybl/tasks/scheduler.c}
+\begin{lstlisting}[style=c]
+void schedule(registers_t* regs) {
+    scheduler_tick_count++;
+    if (scheduler_tick_count >= time_slice) {
+        scheduler_tick_count = 0;
+        process_t* next_process = get_next_process();
+        if (next_process != current_process) {
+            context_switch(current_process, next_process, regs);
+        }
+    }
+}
+\end{lstlisting}
+
+\cod{schedule} is called on every timer tick, but only switches every \cod{time\_slice} ticks. That
+constant is the \term{quantum}: how long a process gets before being preempted.
+
+\begin{concept}{The quantum is a trade-off}
+Short quantum: the system feels responsive, but more time is spent switching than working --- every
+switch costs a save, a restore, a \reg{CR3} reload and a full TLB flush.
+
+Long quantum: less overhead, but a process hogging the CPU makes everything else feel frozen.
+
+Real schedulers vary it dynamically and add priorities: interactive processes get short, frequent
+slices; compute-bound ones get long, rare ones. lytlnyblOS uses a fixed quantum, which is the right
+choice for something you want to be able to read.
+\end{concept}
+
+\subsection{Round robin}
+
+\begin{lstlisting}[style=c]
+process_t* get_next_process() {
+    process_t* traversal_process = current_process;
+    do {
+        if (traversal_process->state == PROCESS_READY) {
+            return traversal_process;
+        }
+        if (!traversal_process->next) {
+            traversal_process = process_head;   /* wrap around */
+        } else {
+            traversal_process = traversal_process->next;
+        }
+    } while (!(traversal_process->state == PROCESS_RUNNING));
+
+    return current_process;
+}
+\end{lstlisting}
+
+Start at the current process, walk forward, wrap at the end, return the first \cod{READY} one.
+Everyone gets a turn, in order, with no favourites. It is the simplest fair policy that exists.
+
+\begin{danger}{What happens when nobody is ready}
+The loop stops when it comes back round to a \cod{RUNNING} process, and then returns
+\cod{current\_process}. But consider: the shell calls \cod{read} and blocks. There is no other
+runnable process. \cod{get\_next\_process} walks the whole list, finds nothing \cod{READY}, comes
+back to the shell --- which is now \cod{BLOCKED}, not \cod{RUNNING} --- and the loop condition
+\cod{while (!(state == RUNNING))} keeps it spinning.
+
+In practice the kernel's own initial process is always \cod{RUNNING}, so the loop terminates and
+returns it. But that is luck, not design: the exit condition depends on a process that happens to
+sit in an infinite loop at the end of \cod{kernel\_main}.
+
+The standard fix is an \hi{idle process}: a kernel process, always \cod{READY}, that does
+nothing but \cod{hlt} in a loop. It guarantees the scheduler always has somewhere to go, and it
+lets the CPU actually sleep when there is no work --- which the current \cod{for(;;)} at the end of
+\cod{kernel\_main} does not.
+\end{danger}
+
+\section{Destroying a process}
+
+\filetag{lytlnybl/tasks/procman.c}
+\begin{lstlisting}[style=c]
+void destroy_process(process_t* proc) {
+    if (!proc || proc->state == PROCESS_RUNNING) return;
+
+    /* unlink it from the list */
+    process_t* traversal_process = process_head;
+    while (traversal_process) {
+        if (traversal_process->pid == process_head->pid
+            && !traversal_process->next
+            && traversal_process->pid == proc->pid) {
+            process_head = traversal_process->next;
+            break;
+        }
+        if (!traversal_process->next) { traversal_process = NULL; break; }
+        if (traversal_process->next->pid == proc->pid) {
+            traversal_process->next = traversal_process->next->next;
+            break;
+        }
+        traversal_process = traversal_process->next;
+    }
+    if (!traversal_process) return;
+
+    kfree(proc->kstack);
+    if (proc->type == PROCESS_USER) {
+        unmap_page(proc->page_directory, USER_STACK_TOP - 4096);
+        unmap_page(proc->page_directory, USER_CODE_BASE);
+        unmap_page(proc->page_directory, USER_VGA);
+        unmap_page(kernel_directory, (uintptr_t)(proc->page_directory));
+    }
+    kfree(proc);
+}
+\end{lstlisting}
+
+This function has several real problems, and it is worth being explicit about them because they are
+representative of how cleanup code goes wrong.
+
+\begin{danger}{Three bugs in one function}
+\textbf{1. The head is never removed if it has a successor.} The first condition requires
+\cod{!traversal\_process->next} --- that the head is also the \emph{last} node. If the head has a
+successor, that branch fails, the second returns early, and the third only ever inspects
+\cod{next}. A terminated head process stays in the list forever.
+
+\textbf{2. \cod{unmap\_page(kernel\_directory, ...)} damages every process.} Every process copies the
+kernel's directory entries, which means they all point at the \emph{same} kernel page tables.
+Removing a mapping from \cod{kernel\_directory} removes it from the shared table --- so it
+disappears from every address space at once, permanently punching a hole in the identity map.
+
+\textbf{3. No physical memory is ever reclaimed.} \cod{unmap\_page} clears the present bit but never
+calls \cod{free\_frame}. The page directory, the code frames, the stack frame and the heap frames
+all stay marked used forever. Run enough programs and the machine runs out of RAM with nothing
+running.
+\end{danger}
+
+\begin{concept}{And a fourth, subtler one}
+\cod{destroy\_process} is called from inside \cod{context\_switch}, which is running \emph{on the
+kernel stack of the process being destroyed}. \cod{kfree(proc->kstack)} marks that stack free while
+the code is still using it, and it continues using it until the \cod{iret}.
+
+Nothing breaks today because nothing allocates in between. But it is a textbook use-after-free, and
+the correct pattern is deferred cleanup: mark the process as reapable and free its resources later,
+from a context that is not standing on them.
+\end{concept}
+
+\begin{tryit}[Watch the teardown problem]
+Boot the system and run \cod{run /bin/user\_test} five or six times in a row from the shell. The
+program works each time, but the display progressively degrades --- output from different runs
+interleaves and overwrites earlier lines. That is the cleanup path leaving the system in a
+progressively worse state. A correct teardown would leave the system indistinguishable from before.
+\end{tryit}
+
+\begin{summary}
+The kernel can now create, schedule, switch and (imperfectly) destroy processes. Everything so far
+runs in ring 0, though. The next part does the thing this whole course has been building towards:
+dropping a program into ring 3 and giving it a controlled way back in.
+\end{summary}

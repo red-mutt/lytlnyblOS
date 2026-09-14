@@ -1,0 +1,1446 @@
+\part{Memory management}
+
+\chapter{The physical memory manager}
+
+\begin{goals}
+  \item Why memory is handed out in fixed-size chunks
+  \item What a bitmap allocator is and how it works
+  \item How the kernel protects itself from its own allocator
+  \item The rounding bug that makes it fail, and why it is so hard to spot
+\end{goals}
+
+\section{Pages and frames}
+
+The first decision any memory manager makes is the size of the unit it deals in. lytlnyblOS, like
+every x86 system, uses \hi{4096 bytes}. The hardware forces this: the paging unit we will meet
+in the next chapter works in 4 KB granules and nothing else.
+
+The vocabulary matters and people mix it up constantly:
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{Term} & \textbf{Meaning} \\
+\midrule
+\term{Frame} & A 4 KB chunk of \emph{physical} RAM. A real, existing piece of hardware \\
+\term{Page}  & A 4 KB chunk of \emph{virtual} address space. A name that may or may not refer to anything \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+The physical manager in this chapter deals only with \emph{frames}. It answers one question, and
+nothing else: \emph{which 4 KB pieces of real RAM are in use?}
+
+\begin{analogy}
+Think of a hotel. The frames are the rooms: they physically exist, there is a fixed number of them,
+and each is either occupied or free. The physical manager is the receptionist with the occupancy
+board. It does not know who is in which room, what they are doing, or why --- only occupied or
+free.
+
+The next chapter introduces room numbers that guests see, which need not match the real ones. That
+is virtual memory.
+\end{analogy}
+
+\section{A bitmap}
+
+With 128 MB of RAM there are $128 \times 1024 / 4 = 32{,}768$ frames. How do you track 32,768
+yes/no facts? With 32,768 bits, that is 4 KB total. That is a \term{bitmap}: one bit per frame, 1 =
+used, 0 = free.
+
+\filetag{lytlnybl/memory/pmm.c}
+\begin{lstlisting}[style=c]
+uint32_t* bitmap = (uint32_t*)BITMAP_BASE;   /* BITMAP_BASE is 0x100000 */
+
+void bitmap_set_frame(uint32_t frame_index) {
+    bitmap[frame_index / 32] |= (1 << (frame_index % 32));
+}
+
+void bitmap_clear_frame(uint32_t frame_index) {
+    bitmap[frame_index / 32] &= ~(1 << (frame_index % 32));
+}
+\end{lstlisting}
+
+The bitmap is an array of \cod{uint32\_t}, so each element holds 32 frames. To reach frame $i$:
+
+\begin{itemize}
+  \item \cod{i / 32} says which array element,
+  \item \cod{i \% 32} says which bit within it,
+  \item \cod{1 << (i \% 32)} builds a mask with only that bit set.
+\end{itemize}
+
+\begin{center}
+\begin{tikzpicture}[font=\ttfamily\scriptsize]
+  \foreach \i in {0,...,7} {
+    \draw[draw=grayborder,fill=graylight] (\i*0.72,0) rectangle (\i*0.72+0.66,0.66);
+  }
+  \node at (0.33,0.33) {1}; \node at (1.05,0.33) {1}; \node at (1.77,0.33) {0};
+  \node at (2.49,0.33) {0}; \node at (3.21,0.33) {1}; \node at (3.93,0.33) {0};
+  \node at (4.65,0.33) {0}; \node at (5.37,0.33) {0};
+  \node[anchor=west,font=\sffamily\scriptsize,text=gray] at (6.0,0.33) {\ldots\ 32 bits = one uint32\_t};
+  \foreach \i/\l in {0/f0,1/f1,2/f2,3/f3,4/f4,5/f5,6/f6,7/f7}
+    \node[font=\ttfamily\tiny,text=gray] at (\i*0.72+0.33,-0.3) {\l};
+  \draw[decorate,decoration={brace,amplitude=3pt},green] (1.44,-0.55) -- (3.15,-0.55)
+    node[midway,below,font=\sffamily\tiny,text=green] {free};
+\end{tikzpicture}
+\end{center}
+
+\section{Allocating and freeing}
+
+\filetag{lytlnybl/memory/pmm.c}
+\begin{lstlisting}[style=c]
+void* alloc_frame() {
+    uint32_t frame_i;
+    for (frame_i = 0; frame_i < total_frames; frame_i++) {
+        uint32_t is_reserved = (bitmap[frame_i / 32] & (1 << (frame_i % 32)));
+        if (!is_reserved) {
+            bitmap_set_frame(frame_i);
+            return (void *)(frame_i * FRAME_SIZE);
+        }
+    }
+    return NULL;    /* out of memory */
+}
+
+void free_frame(void* frame_address) {
+    uint32_t frame_i = (uint32_t)frame_address / FRAME_SIZE;
+    bitmap_clear_frame(frame_i);
+}
+\end{lstlisting}
+
+This is \term{first fit}: scan from the beginning and take the first free frame. Simple, correct,
+and $O(n)$ --- with 32,768 frames the loop can run 32,768 times for a single allocation.
+
+\begin{warn}{Why it is fast enough here, and would not be in general}
+Because allocations are rare (a few at boot, a handful per process) and because free frames tend to
+be near the start, the loop usually exits after a few iterations. A real system keeps a free list, a
+pointer to the last-found position, or a multi-level bitmap. Worth knowing the limit exists, not
+worth fixing here.
+\end{warn}
+
+\begin{danger}{\cod{free\_frame} validates nothing}
+It does not check that the address is page-aligned, that it is within range, or that the frame was
+actually allocated. \cod{free\_frame((void*)0x1001)} silently clears the bit for frame 1, and
+\cod{free\_frame} called twice on the same frame hands it out to two owners. In a kernel, that is
+the seed of arbitrarily strange bugs appearing arbitrarily far away.
+\end{danger}
+
+\section{Initialisation: deciding what is off limits}
+
+This is the delicate part. The manager starts by marking \emph{everything} reserved and then frees
+only what the BIOS map says is usable:
+
+\filetag{lytlnybl/memory/pmm.c}
+\begin{lstlisting}[style=c]
+/* mark every region reserved, for safety */
+for (uint32_t i = 0; i < bitmap_entries; i++) {
+    bitmap[i] = 0xFFFFFFFF;
+}
+
+/* then free the usable regions */
+for (uint32_t i = 0; i < map_entry_count; i++) {
+    if (memory_map[i].type == 1) {                /* usable RAM */
+        uint64_t starting_frame = memory_map[i].base / FRAME_SIZE;
+        uint64_t frame_length   = memory_map[i].length / FRAME_SIZE;
+        for (uint32_t j = starting_frame; j < starting_frame + frame_length; j++) {
+            bitmap_clear_frame(j);
+        }
+    }
+}
+\end{lstlisting}
+
+\begin{concept}{Deny by default}
+Starting with everything reserved and opening up only what is explicitly known to be safe is a
+security principle worth internalising. The opposite --- start everything free and mark the bad
+parts --- fails catastrophically the moment you forget one region, and it fails silently.
+\end{concept}
+
+Then come the specific protections: the BIOS area, the kernel itself, the bitmap, the boot sector
+and video memory.
+
+\begin{lstlisting}[style=c]
+bitmap_set_frame(0);                              /* BIOS data */
+
+uint32_t kernel_frame_index = (uint32_t)&_kernel_start / FRAME_SIZE;
+uint32_t kernel_frame_end   = (uint32_t)&_kernel_end   / FRAME_SIZE;
+for (; kernel_frame_index < kernel_frame_end; kernel_frame_index++) {
+    bitmap_set_frame(kernel_frame_index);         /* the kernel */
+}
+
+uint32_t bitmap_frame_start = BITMAP_BASE / FRAME_SIZE;
+uint32_t bitmap_size_bytes  = bitmap_entries * sizeof(uint32_t);
+uint32_t bitmap_frame_count = (bitmap_size_bytes + FRAME_SIZE - 1) / FRAME_SIZE;
+for (uint32_t i = 0; i < bitmap_frame_count; i++) {
+    bitmap_set_frame(bitmap_frame_start + i);     /* the bitmap itself */
+}
+
+bitmap_set_frame(0x7C00 / FRAME_SIZE);            /* the boot sector */
+
+uint32_t video_frame_index = 0xA0000 / FRAME_SIZE;
+uint32_t video_frame_end   = 0xFFFFF / FRAME_SIZE;
+for (; video_frame_index < video_frame_end; video_frame_index++) {
+    bitmap_set_frame(video_frame_index);          /* video memory */
+}
+\end{lstlisting}
+
+\section{The rounding bug}
+
+Look carefully at two lines above. The bitmap-size calculation uses the round-up idiom:
+
+\begin{lstlisting}[style=c]
+uint32_t bitmap_frame_count = (bitmap_size_bytes + FRAME_SIZE - 1) / FRAME_SIZE;
+\end{lstlisting}
+
+The kernel-end calculation does not:
+
+\begin{lstlisting}[style=c]
+uint32_t kernel_frame_end = (uint32_t)&_kernel_end / FRAME_SIZE;
+\end{lstlisting}
+
+\begin{danger}{The consequence, with real numbers}
+In one build of this project, \cod{\_kernel\_end} is \hexa{13468}.
+
+$$\hexa{13468} \div \hexa{1000} = 19.27 \rightarrow 19 \text{ (integer division truncates)}$$
+
+The loop condition is \cod{index < 19}, so it protects frames 9 through \textbf{18}: addresses
+\hexa{9000} to \hexa{12FFF}. \hi{Frame 19 --- \hexa{13000} to \hexa{13FFF} --- is left free},
+even though the last 1,128 bytes of the kernel live in it.
+
+What lives in those 1,128 bytes? In that build: \cod{idtr}, \cod{terminal}, \cod{keymap},
+\cod{kernel\_directory}, \cod{current\_directory}, \cod{heap\_start\_head}, \cod{open\_files},
+\cod{process\_head}, \cod{current\_process} and the \cod{tss}. Essentially every critical global in
+the kernel.
+
+So \cod{alloc\_frame()} eventually returns \hexa{13000}, the loader copies a user program's code
+into it, and the kernel's own state is destroyed. \cod{terminal.width} and \cod{terminal.height}
+become whatever bytes of the shell binary landed there --- possibly zero. And a zero \cod{width}
+means the divide-by-zero cascade from Chapter 20.
+
+The fix is one line, and it is \hi{now applied in the source tree}:
+\begin{lstlisting}[style=c]
+uint32_t kernel_frame_end = ((uint32_t)&_kernel_end + FRAME_SIZE - 1) / FRAME_SIZE;
+\end{lstlisting}
+\end{danger}
+
+\begin{warn}{Why this bug is so nasty}
+It is \hi{latent}. Whether it bites depends on exactly where \cod{\_kernel\_end} falls and
+which globals end up in the last partial page --- which changes every time you add or remove code.
+A build that works perfectly can break because you added a comment that changed a string constant's
+length.
+
+That is the worst class of bug: one where ``it works on my machine'' and ``it works on the same
+machine yesterday'' are both true, and both meaningless. Part XIII documents how it was actually
+found.
+\end{warn}
+
+\begin{recipe}{asking for and returning physical frames}{ch25-physical-memory}
+Allocates three frames, prints their physical addresses, fills one with \cod{memset} to prove it is
+real memory, frees the middle one and allocates again --- getting the same frame straight back,
+because the allocator is first fit.
+
+The addresses it prints are worth reading: the third frame is not adjacent to the second, because
+the frame holding the boot sector at \hexa{7C00} is protected and gets skipped.
+\end{recipe}
+
+
+\exercise{The region between \hexa{1000} and \hexa{8FFF} is marked usable by the BIOS map and is
+never explicitly protected. The E820 memory map itself was stored at \hexa{5000}. Is that a bug?
+Justify your answer by considering \emph{when} the map is read for the last time.}
+
+% ============================================================
+\chapter{Virtual memory, slowly}
+
+\begin{goals}
+  \item Understand, with no prior knowledge, what virtual memory is and what problem it solves
+  \item Follow an address translation by hand, with real numbers
+  \item Understand why there are two levels of table and not one
+  \item Know what every bit of a page table entry means
+\end{goals}
+
+This is the hardest chapter in the course and the one everything else rests on. It is written to be
+read slowly. If a section does not click, do not push on --- reread it. Nothing later makes sense
+without this.
+
+\section{The problem, told as a story}
+
+Suppose we have two programs and we want to run both.
+
+Program A was compiled to live at address \hexa{400000}. Its code says things like ``jump to
+\hexa{4001A0}'' and ``the variable \cod{counter} is at \hexa{400C20}''. Those addresses are baked
+into the machine code at compile time.
+
+Program B was compiled the same way --- because the compiler always puts programs at
+\hexa{400000}. Its code also says ``jump to \hexa{4001A0}''.
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize]
+  \node[draw=green,fill=greenlight,rounded corners=3pt,minimum width=3.2cm,minimum height=1.6cm,align=center] (a) at (0,0)
+    {\textbf{Program A}\\{\tiny wants to live at}\\ \texttt{0x400000}};
+  \node[draw=purple,fill=purplelight,rounded corners=3pt,minimum width=3.2cm,minimum height=1.6cm,align=center] (b) at (0,-2.2)
+    {\textbf{Program B}\\{\tiny wants to live at}\\ \texttt{0x400000}};
+  \node[draw=red,fill=redlight,rounded corners=3pt,minimum width=3.4cm,minimum height=3.8cm,align=center] (r) at (6,-1.1)
+    {\textbf{Physical RAM}\\[4pt]{\tiny there is only ONE}\\{\tiny address 0x400000}};
+  \draw[-{Stealth[length=2.5mm]},green,thick] (a) -- (r);
+  \draw[-{Stealth[length=2.5mm]},purple,thick] (b) -- (r);
+  \node[text=red,font=\sffamily\bfseries\small] at (3.1,-1.1) {conflict};
+\end{tikzpicture}
+\end{center}
+
+There is only one physical address \hexa{400000}. Both cannot have it.
+
+\subsection{Three bad solutions}
+
+\begin{description}
+  \item[Recompile every program for a free address] Then you cannot run the same binary twice, and
+    you must know at compile time what else will be running. Absurd.
+  \item[Relocate the code at load time] Rewrite every address in the binary as you load it. This
+    was actually done historically. It is slow, error-prone, and requires the binary to carry a
+    table of every address to patch.
+  \item[Ask programs to be polite and avoid each other] This requires trusting every program on the
+    machine. One buggy program takes down everything. This is real mode, and it is why real mode is
+    useless.
+\end{description}
+
+\subsection{The good solution}
+
+Give each program \hi{its own private set of addresses}, and have the hardware translate
+those private addresses into real ones on every single access.
+
+Program A says \hexa{400000} and the hardware quietly turns it into physical \hexa{800000}.
+Program B says \hexa{400000} and the hardware quietly turns it into physical \hexa{C00000}.
+Neither program knows. Neither program can find out. Neither program can reach the other's memory,
+because \emph{there is no address it can write down} that leads there.
+
+\begin{concept}{The central idea of this chapter}
+A \term{virtual address} is a name. A \term{physical address} is a place. Virtual memory is a
+\hi{dictionary from names to places}, and each program gets its own dictionary.
+
+Two programs can use the same name because their dictionaries are different. A program cannot reach
+another's memory because its dictionary has no entry leading there. Isolation is not enforced by
+checking --- it is enforced by \emph{the absence of a translation}.
+\end{concept}
+
+\begin{analogy}[Back to the hotel]
+Every guest is handed a map on which their room is labelled ``Room 1''. Guest A's Room 1 is really
+room 314; guest B's Room 1 is really room 502. Both can say ``I'm going to Room 1'' and both arrive
+somewhere different, without confusion and without ever meeting.
+
+If guest A tries to walk to ``Room 7'' and their map has no Room 7, they do not end up in someone
+else's room --- they end up in front of a wall. The hotel manager (the kernel) gets a call about it.
+That call is a \emph{page fault}.
+\end{analogy}
+
+\section{Why a dictionary of every address is impossible}
+
+The obvious implementation would be a table with one entry per address: 4 billion entries. At 4
+bytes each that is 16 GB of table, to manage 4 GB of memory. Obviously absurd.
+
+The fix is to translate in \hi{blocks}, not individual bytes. If we translate in 4 KB blocks,
+we need only $4\,\text{GB} / 4\,\text{KB} = 1{,}048{,}576$ entries. At 4 bytes each: 4 MB of table.
+
+Better --- but still 4 MB \emph{per process}. Ten processes would be 40 MB of pure bookkeeping,
+most of it describing addresses nobody uses.
+
+\subsection{The trick: split the table in two}
+
+Instead of one table of 1,048,576 entries, use:
+
+\begin{itemize}
+  \item one small table of \hi{1024} entries, called the \term{page directory};
+  \item where each entry points to another table of \hi{1024} entries, called a \term{page
+        table};
+  \item where each of \emph{those} entries describes one 4 KB page.
+\end{itemize}
+
+$1024 \times 1024 = 1{,}048{,}576$. The coverage is identical. But the saving is enormous, because
+\hi{a directory entry can be empty}. A process that uses 8 KB of code and 4 KB of stack needs
+a directory (4 KB) and one or two page tables (4--8 KB) --- about 12 KB, not 4 MB.
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize]
+  \node[draw=accent,fill=accentlight,rounded corners=3pt,minimum width=2.7cm,minimum height=3.4cm,align=center] (d) at (0,0)
+    {\textbf{Page directory}\\[2pt]{\tiny 1024 entries}\\{\tiny 4 KB}};
+  \node[draw=green,fill=greenlight,rounded corners=3pt,minimum width=2.7cm,minimum height=1.5cm,align=center] (t1) at (5,1.2)
+    {\textbf{Page table 0}\\{\tiny 1024 entries}};
+  \node[draw=green,fill=greenlight,rounded corners=3pt,minimum width=2.7cm,minimum height=1.5cm,align=center] (t2) at (5,-1.2)
+    {\textbf{Page table 767}\\{\tiny 1024 entries}};
+  \node[text=gray,font=\sffamily\tiny,align=center] at (5,0) {(the other 1022\\entries are empty)};
+
+  \node[draw=amber,fill=amberlight,rounded corners=3pt,minimum width=2.4cm,minimum height=0.8cm,align=center] (p1) at (9.8,1.7) {4 KB page};
+  \node[draw=amber,fill=amberlight,rounded corners=3pt,minimum width=2.4cm,minimum height=0.8cm,align=center] (p2) at (9.8,0.7) {4 KB page};
+  \node[draw=amber,fill=amberlight,rounded corners=3pt,minimum width=2.4cm,minimum height=0.8cm,align=center] (p3) at (9.8,-1.2) {4 KB page};
+
+  \draw[-{Stealth[length=2mm]},accent] (d) -- (t1);
+  \draw[-{Stealth[length=2mm]},accent] (d) -- (t2);
+  \draw[-{Stealth[length=2mm]},green] (t1) -- (p1);
+  \draw[-{Stealth[length=2mm]},green] (t1) -- (p2);
+  \draw[-{Stealth[length=2mm]},green] (t2) -- (p3);
+\end{tikzpicture}
+\end{center}
+
+\begin{concept}{Where 1024 and 4096 come from}
+These numbers are not arbitrary; they fall out of the arithmetic:
+\begin{itemize}
+  \item A page is 4096 bytes. To address a byte inside it you need
+        $\log_2 4096 = \hi{12 bits}$.
+  \item That leaves $32 - 12 = 20$ bits to name the page.
+  \item Split those 20 evenly: 10 bits and 10 bits. And
+        $2^{10} = \hi{1024}$ --- the size of each table.
+  \item Each entry is 4 bytes, so a table of 1024 entries is exactly
+        $1024 \times 4 = \hi{4096}$ bytes: one page. The tables fit in the very
+        thing they describe.
+\end{itemize}
+The whole design closes on itself. That elegance is why it has survived since 1985.
+\end{concept}
+
+\section{Splitting an address}
+
+Every 32-bit virtual address is read by the hardware as three fields:
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize,x=1cm]
+  \draw[draw=grayborder,fill=accentlight] (0,0) rectangle (4.0,1.0);
+  \node[align=center] at (2.0,0.5) {\textbf{directory index}\\10 bits};
+  \draw[draw=grayborder,fill=greenlight] (4.0,0) rectangle (8.0,1.0);
+  \node[align=center] at (6.0,0.5) {\textbf{table index}\\10 bits};
+  \draw[draw=grayborder,fill=amberlight] (8.0,0) rectangle (12.8,1.0);
+  \node[align=center] at (10.4,0.5) {\textbf{offset within the page}\\12 bits};
+
+  \node[font=\ttfamily\tiny,text=gray] at (0.5,-0.3) {bit 31};
+  \node[font=\ttfamily\tiny,text=gray] at (3.6,-0.3) {22};
+  \node[font=\ttfamily\tiny,text=gray] at (4.4,-0.3) {21};
+  \node[font=\ttfamily\tiny,text=gray] at (7.6,-0.3) {12};
+  \node[font=\ttfamily\tiny,text=gray] at (8.5,-0.3) {11};
+  \node[font=\ttfamily\tiny,text=gray] at (12.3,-0.3) {0};
+\end{tikzpicture}
+\end{center}
+
+And the code that does the splitting is exactly the idiom from Chapter 2:
+
+\filetag{lytlnybl/memory/vmm.c}
+\begin{lstlisting}[style=c]
+uint16_t dir_index   = (virtual_address >> 22);
+uint16_t table_index = (virtual_address >> 12 & 0x3FF);
+/* the offset is virtual_address & 0xFFF */
+\end{lstlisting}
+
+\subsection{A worked example, digit by digit}
+
+Let us translate the virtual address \hexa{00401A2C} completely by hand. This is the kind of address
+a user program actually uses in this system.
+
+\textbf{Step 1 --- write it in binary.}
+
+\hexa{00401A2C} is:
+\begin{center}
+\cod{0000 0000 0100 0000 0001 1010 0010 1100}
+\end{center}
+
+\textbf{Step 2 --- cut it into 10, 10 and 12 bits.}
+
+\begin{center}
+\begin{tikzpicture}[font=\ttfamily\small,x=1cm]
+  \node[anchor=west,text=accent] at (0,0.6) {0000000001};
+  \node[anchor=west,text=green]  at (3.4,0.6) {0000000110};
+  \node[anchor=west,text=amber]  at (6.8,0.6) {100000101100};
+  \node[anchor=west,font=\sffamily\scriptsize,text=accent] at (0,0) {directory = 1};
+  \node[anchor=west,font=\sffamily\scriptsize,text=green]  at (3.4,0) {table = 6};
+  \node[anchor=west,font=\sffamily\scriptsize,text=amber]  at (6.8,0) {offset = 0xA2C = 2604};
+\end{tikzpicture}
+\end{center}
+
+Check it with arithmetic instead of bit-counting:
+\begin{align*}
+\text{directory} &= \hexa{00401A2C} \gg 22 = 4{,}201{,}004 \div 4{,}194{,}304 = 1\\
+\text{table} &= (\hexa{00401A2C} \gg 12) \,\&\, \hexa{3FF} = 1030 \,\&\, 1023 = 6\\
+\text{offset} &= \hexa{00401A2C} \,\&\, \hexa{FFF} = \hexa{A2C} = 2604
+\end{align*}
+
+\textbf{Step 3 --- the hardware walks the tables.}
+
+\begin{enumerate}
+  \item Read \reg{CR3}. Say it holds \hexa{00018000}. That is the physical address of this
+        process's page directory.
+  \item Go to entry \textbf{1} of that directory: physical address
+        $\hexa{18000} + 1 \times 4 = \hexa{18004}$. Suppose it contains \hexa{0001B007}.
+  \item Mask off the flags: $\hexa{0001B007} \,\&\, \hexa{FFFFF000} = \hexa{0001B000}$. That is the
+        physical address of the page table.
+  \item Go to entry \textbf{6} of that table: $\hexa{1B000} + 6 \times 4 = \hexa{1B018}$. Suppose it
+        contains \hexa{00C4D007}.
+  \item Mask again: \hexa{00C4D000}. That is the physical address of the \emph{frame}.
+  \item Add the offset: $\hexa{00C4D000} + \hexa{A2C} = \hi{\hexa{00C4DA2C}}$.
+\end{enumerate}
+
+So virtual \hexa{00401A2C} is physical \hexa{00C4DA2C}. The program has no idea. It never will.
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize,
+  n/.style={draw=grayborder,rounded corners=2pt,minimum width=2.7cm,minimum height=0.85cm,align=center}]
+  \node[n,fill=graylight] (v) at (0,3.2) {virtual\\\texttt{0x00401A2C}};
+  \node[n,fill=redlight,draw=red] (cr3) at (0,1.6) {CR3\\\texttt{0x00018000}};
+  \node[n,fill=accentlight,draw=accent] (dir) at (4.2,1.6) {directory[1]\\\texttt{0x0001B000}};
+  \node[n,fill=greenlight,draw=green] (tab) at (8.4,1.6) {table[6]\\\texttt{0x00C4D000}};
+  \node[n,fill=amberlight,draw=amber] (fin) at (8.4,0) {+ offset 0xA2C\\\texttt{0x00C4DA2C}};
+
+  \draw[-{Stealth[length=2mm]},gray] (v) -- node[left,font=\tiny]{split} (cr3);
+  \draw[-{Stealth[length=2mm]},accent] (cr3) -- node[above,font=\tiny]{index 1} (dir);
+  \draw[-{Stealth[length=2mm]},green] (dir) -- node[above,font=\tiny]{index 6} (tab);
+  \draw[-{Stealth[length=2mm]},amber] (tab) -- (fin);
+\end{tikzpicture}
+\end{center}
+
+\begin{concept}{This happens on every single access}
+Not once per program. Not once per function. \hi{Every time the processor reads or writes
+memory} --- every instruction fetch, every variable access, every stack push --- it performs this
+two-step lookup.
+
+If it really did two extra memory reads per access, computers would run three times slower. They do
+not, because of a cache called the \term{TLB} (Translation Lookaside Buffer) that remembers recent
+translations. The TLB is why the next section matters.
+\end{concept}
+
+\subsection{A second example: a translation that fails}
+
+The first example worked. Now let us take an address in the \emph{same} address space that does not
+resolve, because understanding failure is what makes the mechanism click.
+
+We will translate \hexa{00500000} --- five megabytes in --- inside the shell's address space.
+
+\textbf{Step 1 --- split it.}
+
+\begin{align*}
+\text{directory} &= \hexa{00500000} \gg 22 = 1\\
+\text{table} &= (\hexa{00500000} \gg 12) \,\&\, \hexa{3FF} = 1280 \,\&\, 1023 = 256\\
+\text{offset} &= \hexa{00500000} \,\&\, \hexa{FFF} = 0
+\end{align*}
+
+\textbf{Step 2 --- the directory lookup succeeds.}
+
+Directory entry 1 is present: it covers the whole 4 MB region \hexa{00400000}--\hexa{007FFFFF}, and
+\hexa{500000} falls inside it. So far, so good. The hardware reads the entry, masks off the flags,
+and walks to the page table.
+
+\textbf{Step 3 --- the table lookup fails.}
+
+Entry 256 of that table is \hi{zero}. Bit 0 --- the present bit --- is clear. The address has
+a table to look in, and the table has nothing to say about it.
+
+The hardware stops here. It does not guess, it does not return zero, it does not read whatever
+happens to be at physical \hexa{500000}. It raises \hi{exception 14}, and before jumping to
+the handler it leaves two pieces of evidence:
+
+\begin{center}
+\begin{tabularx}{0.93\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Where} & \textbf{Value} & \textbf{Meaning} \\
+\midrule
+\reg{CR2} & \hexa{00500000} & The address that was being translated \\
+error code & \hexa{4} or \hexa{6} & bit 0 clear: \emph{not present}; bit 2 set: from ring 3; bit 1 set if it was a write \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+So a user program reading that address produces error code \hexa{4}, and writing to it produces
+\hexa{6}. Run it through the handler from Chapter 28 and you get:
+
+\begin{lstlisting}[style=txt]
+PAGE FAULT
+Address: 0x00500000
+Error code: 0x00000006
+Reason: Page not present
+Access: Write
+Mode: User
+\end{lstlisting}
+
+\begin{concept}{Two ways to fail, and they mean different things}
+Notice there are two distinct failures hiding here, and the error code distinguishes them:
+
+\begin{itemize}
+  \item \hi{Bit 0 clear --- not present.} There is no translation. The name means nothing in
+        this address space. This is a wild pointer, a stack that grew too far, or memory that was
+        never allocated.
+  \item \hi{Bit 0 set --- protection violation.} There \emph{is} a translation, but the access
+        was not allowed: writing to a read-only page, or a ring 3 program touching a page whose
+        \cod{PAGE\_USER} bit is clear. The page exists; you just may not do that to it.
+\end{itemize}
+
+The second kind is how the kernel stays protected. When a user program tries to read kernel memory,
+the translation succeeds --- the kernel \emph{is} mapped into its address space --- and it is the
+permission check that stops it, producing error code \hexa{5} (present + user). A program cannot
+tell the difference between ``kernel memory'' and ``memory that does not exist'' except by the error
+code it never gets to see.
+\end{concept}
+
+\begin{warn}{Why an unmapped address is not always an error}
+In a full operating system, most page faults are not bugs. The page might be on disk (swapped out),
+or it might be a stack page the kernel deliberately did not allocate until first touched, or a
+copy-on-write page being written for the first time. In all of those cases the handler fixes the
+situation, and then \emph{re-executes the faulting instruction}, which now succeeds. The program
+never finds out.
+
+lytlnyblOS does none of this: every fault is fatal to the process that caused it. But the mechanism
+is identical, and Part XIII lists on-demand stack growth as one of the most rewarding extensions to
+attempt --- it is about fifteen lines, and it turns this exact failure into a feature.
+\end{warn}
+
+\section{Why a page is 4096 bytes}
+
+The number looks arbitrary. It is not, and seeing why fixes the whole design in your mind.
+
+Page size is a three-way trade-off, and 4 KB is close to the sweet spot for a 32-bit machine.
+
+\subsection{The cost of a small page}
+
+Halve the page to 2 KB and you need twice as many entries to describe the same memory. Worse, the
+arithmetic stops being neat: 2048 bytes needs 11 offset bits, leaving 21 to split between two levels
+--- which do not divide evenly, and whichever way you cut it the tables no longer fit in one page.
+
+Take it down to 1 KB and a two-level split gives 11 and 11 bits: tables of 2048 entries, 8192 bytes
+each. A page table now spans \emph{eight} pages, which the allocator has to find contiguously. The
+elegance is gone.
+
+\subsection{The cost of a large page}
+
+Go up to 16 KB and the tables shrink to 512 entries --- 2 KB, wasting most of a 16 KB page each. And
+now \term{internal fragmentation} bites: every allocation wastes on average half a page.
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}l l l l X@{}}
+\toprule
+\textbf{Page} & \textbf{Offset bits} & \textbf{Split} & \textbf{Table size} & \textbf{Average waste per allocation} \\
+\midrule
+1 KB   & 10 & 11 + 11 & 8 KB (8 pages!) & 512 B \\
+\textbf{4 KB} & \textbf{12} & \textbf{10 + 10} & \textbf{4 KB (exactly 1 page)} & \textbf{2 KB} \\
+16 KB  & 14 & 9 + 9  & 2 KB (1/8 of a page) & 8 KB \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\begin{concept}{4 KB is the size where the design closes on itself}
+Only at 4096 bytes does everything line up:
+\begin{itemize}
+  \item 12 offset bits leave exactly 20, which split evenly into 10 + 10;
+  \item $2^{10} = 1024$ entries, at 4 bytes each, is exactly 4096 bytes;
+  \item so \hi{a page table is exactly one page}.
+\end{itemize}
+That last point is what makes the implementation so short. \cod{create\_page\_table} can just call
+\cod{alloc\_frame()} and use the result directly --- no special allocator, no contiguity problem, no
+leftover space. Look at how little code it takes:
+\begin{lstlisting}[style=c]
+page_table_t* create_page_table(page_directory_t* directory,
+                                uint32_t directory_index, uint32_t flags) {
+    page_table_t* new_table = alloc_frame();
+    memset(new_table, 0, 4096);
+    (*directory)[directory_index] = (uintptr_t)new_table | flags;
+    return new_table;
+}
+\end{lstlisting}
+Four lines, because the page size was chosen so that four lines would do.
+\end{concept}
+
+\begin{warn}{And the reason modern systems also offer huge pages}
+Each TLB entry covers one page. With 4 KB pages, a program touching 1 GB of memory needs 262,144
+distinct translations, and the TLB holds a few hundred --- so it misses constantly.
+
+This is why x86 also supports 2 MB and 1 GB pages. One TLB entry then covers 2 MB, and the same
+program needs 512 translations instead of 262,144. The cost is fragmentation: allocate a 2 MB page
+for a 4 KB structure and you have wasted 2,093,056 bytes.
+
+Databases and virtual machines use huge pages for exactly this reason. lytlnyblOS does not --- the
+bit that enables them lives in the directory entry, and turning it on is a small but genuinely
+instructive change.
+\end{warn}
+
+\section{The TLB and why stale entries kill}
+
+The TLB caches virtual $\rightarrow$ physical translations. It makes paging affordable. It also
+means that \hi{if you change a page table, the processor may not notice}, because it is still
+using a cached answer.
+
+Two instructions fix that:
+
+\filetag{lytlnybl/memory/vmm.asm}
+\begin{lstlisting}[style=asm]
+flush_tlb:              ; throw away EVERYTHING
+    mov eax, cr3
+    mov cr3, eax        ; reloading CR3 with itself clears the whole TLB
+    ret
+
+flush_tlb_page:         ; throw away ONE entry
+    mov eax, [esp + 4]
+    invlpg [eax]
+    ret
+\end{lstlisting}
+
+\cod{invlpg} invalidates a single page's cached translation, which is far cheaper than dumping the
+whole TLB. The mapping code uses it:
+
+\filetag{lytlnybl/memory/vmm.c}
+\begin{lstlisting}[style=c]
+(*selected_table)[table_index] = physical_address | flags;
+if (directory == current_directory) {
+    flush_tlb_page(virtual_address);
+}
+\end{lstlisting}
+
+\begin{warn}{Note the condition}
+The flush only happens if we are modifying the \emph{currently active} directory. Modifying another
+process's directory needs no flush, because the TLB holds nothing from it --- and when that process
+is scheduled, \reg{CR3} is reloaded, which clears the TLB anyway.
+
+Forgetting a flush produces one of the most maddening bugs in systems programming: you map a page,
+the table clearly contains the right entry, you can print it and see it --- and the access still
+faults, because the processor is answering from a cache you cannot see.
+\end{warn}
+
+\section{Anatomy of a table entry}
+
+Each entry is 32 bits. The top 20 hold a physical address (which is enough, because everything is
+page-aligned so the low 12 bits are always zero). Those freed-up 12 bits carry the flags:
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize,x=1cm]
+  \draw[draw=grayborder,fill=accentlight] (0,0) rectangle (7.2,0.95);
+  \node at (3.6,0.47) {physical address, bits 31--12};
+  \foreach \i/\n/\c in {0/G/graylight,1/D/amberlight,2/A/amberlight,3/{}/graylight,4/{}/graylight,
+                        5/U/greenlight,6/W/greenlight,7/P/redlight} {
+    \draw[draw=grayborder,fill=\c] (7.2+\i*0.7,0) rectangle (7.9+\i*0.7,0.95);
+    \node[font=\ttfamily\scriptsize] at (7.55+\i*0.7,0.47) {\n};
+  }
+  \node[font=\ttfamily\tiny,text=gray] at (0.5,-0.3) {bit 31};
+  \node[font=\ttfamily\tiny,text=gray] at (12.4,-0.3) {bit 0};
+\end{tikzpicture}
+\end{center}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}c l l X@{}}
+\toprule
+\textbf{Bit} & \textbf{Name} & \textbf{Constant} & \textbf{Meaning} \\
+\midrule
+0 & P & \cod{PAGE\_PRESENT} & \textbf{The page exists.} If 0, any access raises a page fault \\
+1 & W & \cod{PAGE\_WRITABLE} & Writable. If 0, the page is read-only \\
+2 & U & \cod{PAGE\_USER} & \textbf{Ring 3 may access it.} If 0, kernel only \\
+5 & A & --- & Accessed; set by the processor on any access \\
+6 & D & --- & Dirty; set by the processor on a write \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\filetag{lytlnybl/include/memory/vmm.h}
+\begin{lstlisting}[style=c]
+#define PAGE_PRESENT  0x1
+#define PAGE_WRITABLE 0x2
+#define PAGE_USER     0x4
+\end{lstlisting}
+
+\begin{concept}{Bit 2 is where user isolation actually lives}
+Everything in Part X about user space comes down to this bit. A kernel page has \cod{PAGE\_USER}
+clear; a user page has it set. When a ring 3 program touches an address whose page lacks that bit,
+the processor raises a page fault \emph{before} the access happens. No data leaks. No check in
+software. One bit, enforced in silicon, on every access.
+
+And the corollary: if you accidentally set \cod{PAGE\_USER} on a kernel page, you have handed user
+programs the keys, and nothing will warn you.
+\end{concept}
+
+\begin{warn}{Permissions are checked at both levels}
+The directory entry \emph{also} has W and U bits, and the effective permission is the
+\emph{stricter} of the two. A page marked writable in the table but read-only in the directory is
+read-only. Forgetting this leads to faults that make no sense until you remember to look one level
+up.
+\end{warn}
+
+\section{A real address space, captured live}
+
+Everything so far has been described. This section shows the actual bytes, read out of a running
+lytlnyblOS while the shell sat at its prompt.
+
+\begin{tryit}[How this was captured]
+QEMU's monitor can read guest memory. Started with
+\cod{-monitor unix:/tmp/mon.sock,server,nowait}, the commands are \cod{memsave} (virtual addresses,
+using the current CPU state) and \cod{pmemsave} (physical addresses).
+
+The kernel's \cod{process\_head} global is at \hexa{13400} in this build --- find it with
+\cod{i686-elf-nm build/kernel.elf}. Reading four bytes there gives the head of the process list;
+walking \cod{next} at offset 96 and reading \cod{page\_directory} at offset 100 gives each process's
+directory, which \cod{pmemsave} can then dump in full.
+\end{tryit}
+
+\subsection{The process list}
+
+\begin{lstlisting}[style=txt]
+process_head -> 0xc000000c
+  pid=1  KERNEL RUNNING  pd=0x00001000 cs=0x08 eip=0x0000b022 esp=0x00012998
+  pid=2  KERNEL RUNNING  pd=0x00001000 cs=0x08 eip=0x0000ac08 esp=0x00012534
+  pid=3  USER   BLOCKED  pd=0x00019000 cs=0x1b eip=0x004010f2 esp=0xbfffef9c
+\end{lstlisting}
+
+Read that carefully, because several things from earlier chapters are visible at once:
+
+\begin{itemize}
+  \item \cod{process\_head} is \hexa{C000000C} --- in the kernel heap, twelve bytes past
+        \hexa{C0000000}, which is exactly \cod{sizeof(heap\_header\_t)}. It is the very first
+        \cod{kmalloc} the system ever performs.
+  \item Both kernel processes share \cod{pd=0x00001000}: the one kernel directory. The shell has its
+        own at \hexa{19000}.
+  \item The shell's \cod{cs} is \hexa{1B}. That is \hexa{18}\cod{ | 3} --- the user code selector
+        with RPL 3. \hi{This is the number that proves it is running unprivileged.}
+  \item Its \cod{eip} is \hexa{4010F2}: inside the code mapped at \hexa{400000}. Its \cod{esp} is
+        \hexa{BFFFEF9C}: just under \hexa{BFFFF000}, the stack top.
+  \item Its state is \cod{BLOCKED} --- it is waiting in \cod{read()} for a keystroke, exactly as
+        Chapter 24 described.
+\end{itemize}
+
+\subsection{The shell's page directory}
+
+Dumping all 4096 bytes at physical \hexa{19000} and listing only the non-zero entries gives this ---
+\hi{five entries out of 1024}:
+
+\begin{lstlisting}[style=txt]
+dir[  0] = 0x00002023  table@0x00002000 flags=0x023  covers 0x00000000-0x003fffff
+dir[  1] = 0x0001f027  table@0x0001f000 flags=0x027  covers 0x00400000-0x007fffff
+dir[  2] = 0x0001d007  table@0x0001d000 flags=0x007  covers 0x00800000-0x00bfffff
+dir[767] = 0x0001b027  table@0x0001b000 flags=0x027  covers 0xbfc00000-0xbfffffff
+dir[768] = 0x00004023  table@0x00004000 flags=0x023  covers 0xc0000000-0xc03fffff
+\end{lstlisting}
+
+This one listing is the entire argument for two-level tables. A flat table would need 1,048,576
+entries and 4 MB. This process describes its whole world with a 4 KB directory and four 4 KB tables:
+\hi{20 KB instead of 4 MB}, because 1019 of the 1024 entries are simply zero.
+
+Decoding the flags with the table from the previous section:
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}l l l X@{}}
+\toprule
+\textbf{Entry} & \textbf{Flags} & \textbf{Decoded} & \textbf{What it is} \\
+\midrule
+dir[0]   & \hexa{023} & P, W, A       & The identity-mapped kernel. \textbf{No U bit} \\
+dir[1]   & \hexa{027} & P, W, U, A    & User code at \hexa{400000} \\
+dir[2]   & \hexa{007} & P, W, U       & User heap region. \textbf{No A bit --- never touched yet} \\
+dir[767] & \hexa{027} & P, W, U, A    & User stack \\
+dir[768] & \hexa{023} & P, W, A       & The kernel heap. \textbf{No U bit} \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\begin{concept}{The U bit, doing its job, visible in real data}
+Three of these regions are reachable from ring 3 and two are not, and the only difference is bit 2.
+The kernel is \emph{present} in this address space --- it has to be, or interrupts could not be
+handled --- but \cod{dir[0]} and \cod{dir[768]} lack the U bit, so the shell cannot read a single
+byte of it. Not because anything checks: because the hardware refuses.
+
+That is the whole of user-space isolation, and here it is as two hexadecimal digits differing by 4.
+\end{concept}
+
+\begin{warn}{The accessed bit tells you what has actually run}
+\cod{dir[2]} has no A bit, while every other entry does. The processor sets A on first access, so
+this says the shell \emph{has never touched its heap}.
+
+And that is exactly right: the shell blocks in \cod{read()} on its very first loop iteration, before
+it ever reaches \cod{tokenize\_line}, which is where the first \cod{calloc} happens. The hardware is
+reporting, accurately, that a line of C has not been reached yet. It is a small thing, but it is a
+good demonstration that these bits are real and live.
+\end{warn}
+
+\subsection{Inside the tables}
+
+Dumping the four tables and listing the non-zero entries:
+
+\begin{lstlisting}[style=txt]
+table for dir[1] (0x00400000) : 2 entries
+   [   0] 0x0001e027 -> phys 0x0001e000  [P,W,U,A]   virt 0x00400000
+   [   1] 0x00020027 -> phys 0x00020000  [P,W,U,A]   virt 0x00401000
+
+table for dir[2] (0x00800000) : 1 entry
+   [ 512] 0x0001c007 -> phys 0x0001c000  [P,W,U]     virt 0x00a00000
+
+table for dir[767] (0xbfc00000) : 1 entry
+   [1022] 0x0001a067 -> phys 0x0001a000  [P,W,U,A,D] virt 0xbfffe000
+
+table for dir[0] (0x00000000) : 1024 entries, contiguous identity map
+   [   0] 0x00000003 -> phys 0x00000000  [P,W]       virt 0x00000000
+   [   1] 0x00001063 -> phys 0x00001000  [P,W,A,D]   virt 0x00001000
+   ...
+   [1023] 0x003ff003 -> phys 0x003ff000  [P,W]       virt 0x003ff000
+\end{lstlisting}
+
+Every number here can be predicted from the code, which is the best possible confirmation that you
+have understood it:
+
+\begin{description}
+  \item[Two code pages, not one] \cod{rootfs/bin/shell} is 4,392 bytes, and
+    $\lceil 4392 / 4096 \rceil = 2$. That is precisely the loop bound in \cod{load\_program}. The
+    two frames, \hexa{1E000} and \hexa{20000}, are \emph{not adjacent} --- \hexa{1F000} went to the
+    page table itself, allocated in between. Physical scattering, virtual contiguity: the entire
+    point of paging, visible in three numbers.
+  \item[The heap page is at table index 512] \cod{USER\_HEAP\_START} is \hexa{A00000}.
+    $(\hexa{A00000} \gg 12) \,\&\, \hexa{3FF} = 512$. It is the only mapped page in that 4 MB
+    region, which is why the region shows one entry out of 1024.
+  \item[The stack page is at index 1022] \cod{USER\_STACK\_TOP} is \hexa{BFFFF000} and
+    \cod{create\_uprocess} maps \cod{USER\_STACK\_TOP - 4096} = \hexa{BFFFE000}.
+    $(\hexa{BFFFE000} \gg 12) \,\&\, \hexa{3FF} = 1022$. And the saved \cod{esp} was \hexa{BFFFEF9C},
+    which is inside that page --- 3,996 bytes into it, with 100 bytes of stack used.
+  \item[The stack page is the only dirty one] Flags \hexa{067} include D. The processor sets D on
+    the first \emph{write}. Code pages are read and executed but not written; the heap has not been
+    touched; only the stack has been written to. The hardware has independently confirmed what the
+    program does.
+\end{description}
+
+\begin{danger}{And the one-page stack limit, in the same listing}
+That table has exactly one entry. The next page down, \hexa{BFFFD000} at index 1021, is zero.
+
+So the moment \reg{ESP} drops below \hexa{BFFFE000} --- 4,096 bytes of stack --- the translation
+fails exactly like the \hexa{500000} example earlier, and the process dies. The saved \cod{esp}
+shows 100 bytes in use, so there are 3,996 bytes of headroom. A local array of 4 KB, or roughly
+forty nested calls, and the shell is gone.
+
+This is the limitation described in Chapter 33, and here is the measurement that proves it.
+\end{danger}
+
+\section{The same address in two address spaces}
+
+The promise at the start of this chapter was that two programs could both use \hexa{400000} without
+colliding. The dumps let us check the claim directly.
+
+In the \emph{shell's} directory, entry 1 is present and maps \hexa{400000} to physical
+\hexa{1E000}. In the \emph{kernel's} directory --- dumped separately from physical \hexa{1000} ---
+entry 1 is:
+
+\begin{lstlisting}[style=txt]
+dir[0] = 0x00002023   (the identity map)
+dir[1] = 0x00000000   <- nothing
+\end{lstlisting}
+
+\begin{concept}{The same number, two different truths}
+\hexa{400000} is a perfectly valid address in the shell's world: it holds the first instruction the
+shell executes. In the kernel's world the identical number means nothing at all --- touching it
+raises a page fault.
+
+Nothing about the address changed. What changed is which dictionary was open, and \reg{CR3} is what
+selects the dictionary. \hi{Changing \reg{CR3} changes what every address in the machine
+means}, in one instruction.
+
+That is why \cod{set\_cr3} appears in \cod{context\_switch}, and why the keyboard handler has to
+change it before writing into a sleeping process's buffer. And it is why running a second copy of a
+program needs no relocation, no cooperation and no trust: the loader allocates fresh frames, writes
+them into \emph{that} process's table at the same virtual address, and the two programs are now
+mutually invisible while both believing they live at \hexa{400000}.
+\end{concept}
+
+\begin{warn}{With one deliberate exception}
+Look again at \cod{dir[0]} in both directories: \hi{both are \hexa{00002023}, pointing at the
+same page table at physical \hexa{2000}.}
+
+That is not a coincidence and not a copy --- it is literally the same table, shared. It is what
+\cod{create\_uprocess} does when it copies all 1024 directory entries from the kernel directory, and
+it is why the kernel appears at the same addresses in every process.
+
+It is also why the bug in \cod{destroy\_process} described in Chapter 32 is serious: calling
+\cod{unmap\_page} on \cod{kernel\_directory} edits that shared table, so the hole it punches appears
+in every address space in the system at once.
+\end{warn}
+
+\begin{recipe}{mapping, aliasing, translating and unmapping}{ch27-paging}
+The whole of this chapter as running code. It maps a frame at \hexa{40000000} --- chosen because it
+is above the identity map, below the kernel heap and outside every user region --- writes through
+the virtual address and reads the value back through the physical one, then maps a \emph{second}
+virtual address onto the same frame and shows a write through one appearing through the other.
+
+It then splits the address by hand, compares against \cod{get\_physical\_address}, unmaps, and
+builds a complete new address space with the kernel copied in. Along the way it demonstrates that
+\cod{get\_physical\_address} never checks the present bit, so it keeps reporting an address for a
+page you have just unmapped.
+\end{recipe}
+
+
+\exercise{The virtual address \hexa{C0000000} is the start of the kernel heap. Split it into its
+three fields by hand and state which directory entry it uses. (Check: the answer is a well-known
+round number, and it explains why \hexa{C0000000} was chosen rather than, say, \hexa{C0000400}.)}
+
+% ============================================================
+\chapter{Paging in practice}
+
+\begin{goals}
+  \item Read the real mapping code line by line
+  \item Understand identity mapping and why the kernel needs it
+  \item See how a process gets its own address space
+\end{goals}
+
+\section{Turning it on}
+
+\filetag{lytlnybl/memory/vmm.c}
+\begin{lstlisting}[style=c]
+void init_vmm() {
+    kernel_directory   = alloc_frame();
+    page_table_t* tbl_ptr = alloc_frame();
+
+    memset(kernel_directory, 0, 4096);
+    memset(tbl_ptr, 0, 4096);
+
+    /* map the first 4 MB with identity: virtual X -> physical X */
+    for (uint32_t i = 0; i < 1024; i++) {
+        (*tbl_ptr)[i] = (i * 0x1000) | PAGE_PRESENT | PAGE_WRITABLE;
+    }
+
+    (*kernel_directory)[0] = ((uintptr_t)tbl_ptr) | PAGE_PRESENT | PAGE_WRITABLE;
+
+    current_directory = kernel_directory;
+    set_cr3((uintptr_t)kernel_directory);
+    set_cr0();      /* enable paging: the moment of truth */
+}
+\end{lstlisting}
+
+The loop fills entry $i$ with physical address $i \times 4096$. So entry 0 maps virtual
+\hexa{0000}--\hexa{0FFF} to physical \hexa{0000}--\hexa{0FFF}, entry 1 maps \hexa{1000} to
+\hexa{1000}, and so on for 1024 entries: exactly 4 MB.
+
+\begin{concept}{Why identity mapping is necessary, not just convenient}
+Think about what happens the instant \cod{set\_cr0()} executes. Before it, addresses were physical.
+After it, they are virtual. But \reg{EIP} does not change --- the very next instruction is fetched
+from the same numeric address it would have been anyway.
+
+If that address did not map to itself, the processor would fetch the next instruction from
+somewhere completely different, and the system would die instantly and inexplicably.
+
+Identity mapping the region containing the kernel makes the transition a non-event. The kernel sits
+at \hexa{9000}, the stack, the bitmap at \hexa{100000} and the video buffer at \hexa{B8000} are all
+below 4 MB, so all of them keep working unchanged.
+\end{concept}
+
+\begin{danger}{Only 4 MB is identity-mapped}
+\cod{alloc\_frame()} hands out frames from anywhere in physical RAM --- but the kernel can only
+\emph{reach} the first 4 MB. If an allocation ever returns a frame above \hexa{400000}, the
+\cod{memset} in \cod{create\_page\_table} or the \cod{memcpy} in the program loader will touch an
+unmapped address and fault.
+
+It does not happen today because \cod{alloc\_frame} scans from frame 0 and the system uses only a
+few dozen frames. But it is a ceiling, not a safety property. Any change that increases memory
+usage --- more processes, a bigger heap, larger programs --- walks towards it. The proper fixes are
+either to identity-map more of RAM, or to give the kernel a temporary mapping window it can point
+at any frame.
+\end{danger}
+
+\section{Mapping a page}
+
+\filetag{lytlnybl/memory/vmm.c}
+\begin{lstlisting}[style=c]
+void map_page(page_directory_t* directory, uintptr_t virtual_address,
+              uintptr_t physical_address, uint32_t flags) {
+    uint16_t dir_index   = (virtual_address >> 22);
+    uint16_t table_index = (virtual_address >> 12 & 0x3FF);
+
+    uint32_t dir_entry = (*directory)[dir_index];
+    page_table_t* selected_table;
+
+    if (!(dir_entry & PAGE_PRESENT)) {
+        /* no table for this 4 MB region yet: create one */
+        selected_table = create_page_table(directory, dir_index, flags);
+    } else {
+        selected_table = (page_table_t*)(dir_entry & 0xFFFFF000);
+    }
+
+    (*selected_table)[table_index] = physical_address | flags;
+
+    if (directory == current_directory) {
+        flush_tlb_page(virtual_address);
+    }
+}
+\end{lstlisting}
+
+This is the function that does everything. Split the address, find or create the table, write the
+entry, flush if needed.
+
+\begin{warn}{A subtlety in \cod{create\_page\_table}}
+Notice that the same \cod{flags} are used for both the page table entry and the directory entry. If
+you map a user page with \cod{PAGE\_USER}, the newly created directory entry also gets
+\cod{PAGE\_USER} --- which is what you want here. But it means the \emph{first} page mapped into a
+4 MB region decides the directory-level permissions for that whole region. Map a kernel-only page
+first and a user page second into the same region, and the user page will be unreachable from ring
+3 because the directory entry lacks the U bit. This is a real trap.
+\end{warn}
+
+\section{A process's own address space}
+
+\filetag{lytlnybl/tasks/procman.c}
+\begin{lstlisting}[style=c]
+void create_uprocess(process_t* new_process) {
+    new_process->page_directory = (page_directory_t*)alloc_frame();
+    memset((page_directory_t*)new_process->page_directory, 0, 4096);
+
+    /* copy every kernel mapping */
+    for (uint32_t i = 0; i < 1024; i++) {
+        (*new_process->page_directory)[i] = (*kernel_directory)[i];
+    }
+
+    /* then add what is private to this process */
+    uintptr_t ustack_frame = (uintptr_t)alloc_frame();
+    map_page(new_process->page_directory, USER_STACK_TOP - 4096, ustack_frame,
+             PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER);
+
+    map_page(new_process->page_directory, USER_HEAP_START,
+             (uintptr_t)alloc_frame(),
+             PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER);
+    /* ... */
+}
+\end{lstlisting}
+
+\begin{concept}{Why the kernel is mapped into every process}
+It looks wasteful and even dangerous to copy the kernel's mappings into every user address space.
+It is neither, and it is what every real operating system does.
+
+The reason is the interrupt. When a user process makes a system call or the timer fires, the
+processor switches to ring 0 --- but \hi{it does not change \reg{CR3}}. The kernel therefore
+begins executing with the \emph{user's} page directory still active. If the kernel's code were not
+mapped there, the very first instruction of the handler would fault.
+
+Safety comes from the \cod{PAGE\_USER} bit: those kernel mappings lack it, so they are present but
+unreachable from ring 3. The kernel is visible to the hardware and invisible to the program.
+\end{concept}
+
+\begin{warn}{The tables are shared, not copied}
+The copy loop copies \emph{directory entries}, which are pointers. Every process therefore points
+at the \emph{same} kernel page tables. That is intentional and efficient --- a change to a kernel
+mapping is instantly visible everywhere.
+
+But it also means that unmapping something from \cod{kernel\_directory} affects every process
+simultaneously. There is a place in \cod{destroy\_process} that does exactly that, and Part XIII
+explains why it is a bug.
+
+The source code even carries a warning about this:
+\begin{lstlisting}[style=c]
+/* if you ever try to create more mappings and get a general protection fault
+ * it is likely that you have overwritten an existing kernel mapping, as we copy
+ * the kernel mappings to the user process for when we use our interrupts, just
+ * be careful of this */
+\end{lstlisting}
+\end{warn}
+
+\section{The address space, laid out}
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize,x=1cm,y=1cm]
+  \def\w{7.6}
+  \newcommand{\banda}[5]{%
+    \fill[#4,draw=grayborder] (0,#1) rectangle (\w,#2);
+    \node[align=center,font=\sffamily\scriptsize] at (\w/2,{(#1+#2)/2}) {#3};
+    \node[anchor=west,font=\ttfamily\tiny,text=gray] at (\w+0.15,#1) {#5};
+  }
+  \banda{0}{1.0}{\textbf{Identity-mapped kernel}\\{\tiny code, stack, bitmap, VGA}}{redlight}{0x00000000}
+  \banda{1.0}{1.9}{\textbf{User code}\\{\tiny loaded program}}{greenlight}{0x00400000}
+  \banda{1.9}{2.7}{\textbf{User heap}\\{\tiny grows upward via sbrk}}{greenlight}{0x00A00000}
+  \banda{2.7}{3.3}{User VGA {\tiny (reserved)}}{graylight}{0x00B00000}
+  \banda{3.3}{4.3}{\textit{unmapped}}{white}{}
+  \banda{4.3}{5.1}{\textbf{User stack}\\{\tiny grows downward}}{greenlight}{0xBFFFF000}
+  \banda{5.1}{6.1}{\textbf{Kernel heap}\\{\tiny kmalloc, grows upward}}{redlight}{0xC0000000}
+  \node[anchor=west,font=\ttfamily\tiny,text=gray] at (\w+0.15,6.1) {0xFFFFFFFF};
+\end{tikzpicture}
+\end{center}
+
+Note the deliberate design: the user stack grows down from \hexa{BFFFF000} and the user heap grows
+up from \hexa{A00000}. They approach each other with a large gap between. If they ever met, one
+would silently corrupt the other --- and nothing in this system checks for that.
+
+% ============================================================
+\chapter{Page faults}
+
+\begin{goals}
+  \item What a page fault is and why it is not always an error
+  \item How to decode the error code
+  \item How to read a fault and find the cause
+\end{goals}
+
+\section{The most useful exception}
+
+A \term{page fault} (exception 14) fires whenever the processor cannot complete a translation. In a
+mature operating system that is often \emph{normal} and even desirable: it is how demand paging,
+swapping, copy-on-write and lazy stack growth are implemented. The kernel fixes the situation and
+resumes the instruction as if nothing happened.
+
+lytlnyblOS does none of that. Here a page fault always means a bug. But its handler is still the
+single most informative diagnostic in the system.
+
+\section{Two sources of information}
+
+\begin{description}
+  \item[\reg{CR2}] The processor puts \emph{the address that was accessed} here. This is the first
+    thing to look at.
+  \item[The error code] Pushed on the stack, it describes \emph{what kind} of access failed.
+\end{description}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}c l X@{}}
+\toprule
+\textbf{Bit} & \textbf{If 0} & \textbf{If 1} \\
+\midrule
+0 & The page was not present & Protection violation (page existed, access not allowed) \\
+1 & It was a read & It was a write \\
+2 & From the kernel (ring 0) & \textbf{From a user program (ring 3)} \\
+3 & --- & A reserved bit was set in a table entry \\
+4 & --- & It was an instruction fetch \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\filetag{lytlnybl/memory/vmm.c}
+\begin{lstlisting}[style=c]
+void page_fault_handler(registers_t* registers) {
+    uintptr_t address = get_cr2();
+    uint32_t error_code = registers->error_code;
+
+    vga_text_writeline(&terminal, "PAGE FAULT");
+
+    vga_text_write(&terminal, "Address: ");
+    vga_text_write_hex(&terminal, address);
+    vga_text_writeline(&terminal, "");
+
+    if (error_code & PRESENT_FAULT)
+        vga_text_writeline(&terminal, "Reason: Protection violation");
+    else
+        vga_text_writeline(&terminal, "Reason: Page not present");
+
+    if (error_code & WRITE_FAULT) vga_text_writeline(&terminal, "Access: Write");
+    else                          vga_text_writeline(&terminal, "Access: Read");
+
+    if (error_code & USER_FAULT)  vga_text_writeline(&terminal, "Mode: User");
+    else                          vga_text_writeline(&terminal, "Mode: Kernel");
+
+    vga_text_write(&terminal, "Instruction address: ");
+    vga_text_write_hex(&terminal, registers->eip);
+    vga_text_writeline(&terminal, "");
+}
+\end{lstlisting}
+
+\section{Reading a fault}
+
+The combination of address, reason and mode usually identifies the bug immediately:
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Address} & \textbf{Reason} & \textbf{Almost certainly} \\
+\midrule
+\hexa{00000000} or near & not present & A null pointer dereference \\
+Just below a stack region & not present & \textbf{Stack overflow} \\
+A kernel address, mode User & protection & A user program reaching where it should not \\
+A page you just mapped & not present & A missing TLB flush \\
+An address in a mapped page & protection & Writing to a read-only page, or missing \cod{PAGE\_USER} \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\begin{concept}{The stack overflow signature}
+This one is worth memorising because it is the most common serious fault in a kernel. You see a
+fault at an address \emph{just below} the bottom of a stack region, with \cod{Mode: Kernel} and
+usually \cod{Access: Write}, and the faulting instruction is a \cod{push} or a function prologue.
+
+Example from this project: a fault at \hexa{BFFFFFFC} with \reg{ESP} = \hexa{C0000000}. Since
+\hexa{C0000000} is the start of the kernel heap, a stack had grown downwards right off the bottom of
+the heap's first page. That single observation identified the entire failure chain described in
+Part XIII.
+\end{concept}
+
+% ============================================================
+\begin{recipe}{reading a page fault report}{ch28-page-fault}
+Three lines that write to \hexa{50000000}, which nothing maps. The comment above the write predicts
+the report --- address, reason, access, mode, and an error code of \hexa{2} --- before you run it,
+so you can check your understanding against the processor's own answer.
+\end{recipe}
+
+% ============================================================
+\chapter{The kernel heap}
+
+\begin{goals}
+  \item Why pages are not enough and a byte allocator is needed
+  \item How a linked-list heap works
+  \item Understand splitting and merging of blocks
+  \item Know the limitations of this implementation
+\end{goals}
+
+\section{Why pages are not enough}
+
+The physical manager hands out 4 KB at a time. But a \cod{process\_t} structure is about 100 bytes.
+Giving it a whole page wastes 97\,\% of it, and with a few dozen structures you have burned megabytes
+on nothing.
+
+The \term{heap} sits on top: it asks the page manager for pages, and hands out \emph{bytes} from
+within them.
+
+\section{The design: a linked list of blocks}
+
+Every block of the heap is preceded by a small header:
+
+\filetag{lytlnybl/include/memory/heap.h}
+\begin{lstlisting}[style=c]
+typedef struct heap_header {
+    size_t size;                 /* usable bytes in this block */
+    bool free;                   /* is it available? */
+    struct heap_header* next;    /* the next block */
+} heap_header_t;
+\end{lstlisting}
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize,x=1cm]
+  \draw[draw=grayborder,fill=amberlight] (0,0)   rectangle (1.1,1.0);
+  \draw[draw=grayborder,fill=greenlight] (1.1,0) rectangle (3.6,1.0);
+  \draw[draw=grayborder,fill=amberlight] (3.6,0) rectangle (4.7,1.0);
+  \draw[draw=grayborder,fill=redlight]  (4.7,0) rectangle (7.2,1.0);
+  \draw[draw=grayborder,fill=amberlight] (7.2,0) rectangle (8.3,1.0);
+  \draw[draw=grayborder,fill=greenlight] (8.3,0) rectangle (10.8,1.0);
+  \node[font=\sffamily\tiny] at (0.55,0.5) {hdr};
+  \node[font=\sffamily\tiny,align=center] at (2.35,0.5) {free\\120 B};
+  \node[font=\sffamily\tiny] at (4.15,0.5) {hdr};
+  \node[font=\sffamily\tiny,align=center] at (5.95,0.5) {used\\64 B};
+  \node[font=\sffamily\tiny] at (7.75,0.5) {hdr};
+  \node[font=\sffamily\tiny,align=center] at (9.55,0.5) {free\\3800 B};
+  \draw[-{Stealth[length=2mm]},accent] (0.55,1.1) to[bend left=35] (4.15,1.1);
+  \draw[-{Stealth[length=2mm]},accent] (4.15,1.1) to[bend left=35] (7.75,1.1);
+  \node[font=\sffamily\tiny,text=accent] at (5.9,2.0) {next pointers};
+\end{tikzpicture}
+\end{center}
+
+The header lives \emph{immediately before} the memory it describes. That is why \cod{kmalloc}
+returns a pointer past the header, and \cod{kfree} works backwards to find it:
+
+\filetag{lytlnybl/memory/heap.c}
+\begin{lstlisting}[style=c]
+return (void*)((uintptr_t)block + sizeof(heap_header_t));   /* in kmalloc */
+
+heap_header_t* get_header(void* ptr) {                      /* in kfree */
+    return (heap_header_t*)((uintptr_t)ptr - sizeof(heap_header_t));
+}
+\end{lstlisting}
+
+\begin{analogy}
+Every block is a parcel with a label stuck to the front. The label says how big the parcel is,
+whether it is empty, and where the next parcel is. When you are handed a parcel you are given the
+address of the \emph{contents}; to read the label you step backwards by the label's width.
+
+And if you scribble past the end of your parcel, you write on the next parcel's label --- which is
+why heap overflows corrupt the allocator itself rather than just neighbouring data.
+\end{analogy}
+
+\section{Allocating}
+
+\filetag{lytlnybl/memory/heap.c}
+\begin{lstlisting}[style=c]
+void* kmalloc(size_t requested_size) {
+    if (!requested_size) return NULL;
+
+    heap_header_t* block = find_free_block(requested_size);
+    if (block) {
+        split_block(block, requested_size);
+        block->free = false;
+        return (void*)((uintptr_t)block + sizeof(heap_header_t));
+    } else {
+        expand_heap(requested_size);
+        return kmalloc(requested_size);     /* try again */
+    }
+}
+\end{lstlisting}
+
+\subsection{Splitting}
+
+If a 4000-byte block is used to satisfy a 100-byte request, the remaining 3900 bytes should not be
+lost. \cod{split\_block} cuts it in two:
+
+\begin{lstlisting}[style=c]
+void split_block(heap_header_t* block, size_t requested_size) {
+    size_t space_remaining = (block->size - requested_size);
+    if (space_remaining < sizeof(heap_header_t) + sizeof(uint8_t)) {
+        return;   /* not worth splitting: the remainder could not even hold a header */
+    }
+    /* ... create a new header in the middle and link it in ... */
+}
+\end{lstlisting}
+
+That guard matters: a remainder smaller than a header plus one byte would produce a block that can
+never be used, and whose header would overlap the next block.
+
+\subsection{Freeing and merging}
+
+\begin{lstlisting}[style=c]
+void merge_blocks(heap_header_t* block) {
+    if (!block->next || !block->next->free) return;
+    heap_header_t* block_to_merge = block->next;
+
+    block->size += block_to_merge->size + sizeof(heap_header_t);
+    block->next  = block_to_merge->next;
+    return merge_blocks(block);    /* keep going while the next is free */
+}
+
+void kfree(void* ptr) {
+    if (!ptr) return;
+    heap_header_t* block_to_free = get_header(ptr);
+    block_to_free->free = true;
+    merge_blocks(block_to_free);
+}
+\end{lstlisting}
+
+Merging matters because without it the heap fragments: you end up with plenty of free bytes, none
+of them adjacent, and a 200-byte request fails surrounded by free memory.
+
+\begin{warn}{It only merges forwards}
+\cod{merge\_blocks} joins a block with the ones \emph{after} it. If you free a block whose
+\emph{predecessor} is already free, they stay separate --- the list is singly linked, so there is no
+way to look back.
+
+The classic fix is a doubly linked list, or storing a copy of the size at the end of each block (a
+``footer'') so the previous block's header can be found by arithmetic. As it stands, the heap
+fragments more than it needs to.
+\end{warn}
+
+\section{Growing}
+
+\begin{lstlisting}[style=c]
+void expand_heap(size_t required_size) {
+    uint32_t required_pages = (required_size + 4096 - 1) / 4096;
+    for (size_t i = 0; i < required_pages; i++) {
+        void* new_page_physical_start = alloc_frame();
+        map_page(kernel_directory, heap_end,
+                 (uintptr_t)new_page_physical_start,
+                 PAGE_PRESENT | PAGE_WRITABLE);
+        /* ... append or extend the last block ... */
+        heap_end += 0x1000;
+    }
+}
+\end{lstlisting}
+
+There is the round-up idiom again, this time used correctly. And there is the dependency chain from
+Chapter 6 made concrete: the heap calls \cod{map\_page} (virtual memory), which calls
+\cod{alloc\_frame} (physical memory). Three layers, each built on the one below.
+
+\begin{warn}{No alignment}
+\cod{kmalloc(1)} followed by \cod{kmalloc(4)} returns a 4-byte block at an odd address. On x86
+unaligned access works, just slower; on many other architectures it faults outright. A production
+allocator rounds every request up to 8 or 16 bytes. Worth knowing if you ever port this.
+\end{warn}
+
+\begin{recipe}{kmalloc, kfree, and watching the block list}{ch29-heap}
+Allocates two blocks, then prints the whole block list after every operation, so you can watch
+splitting happen and then watch the forward-only merge leave a hole behind.
+
+The first block it shows is not one of ours: it is the 112-byte \cod{process\_t} that
+\cod{init\_procman} allocated during boot --- the very first \cod{kmalloc} the system performs.
+
+It also demonstrates something easy to trip over when writing your own examples: the file keeps the
+full initialisation sequence even though it only uses the heap, because \cod{idt\_init} enables
+interrupts, the timer then fires, and the scheduler walks a process list that
+\cod{init\_procman} has to have built first.
+\end{recipe}
+
+\begin{tryit}
+The kernel exercises the heap during boot:
+\begin{lstlisting}[style=c]
+uint32_t* numbers = (uint32_t*)kmalloc(5 * sizeof(uint32_t));
+for (int i = 0; i < 5; i++) numbers[i] = (i + 1) * 10;
+/* ... print them ... */
+kfree(numbers);
+\end{lstlisting}
+If you see \cod{Values: 10 20 30 40 50} on screen, the whole three-layer stack works: physical
+manager, paging and heap.
+\end{tryit}
+
+\begin{summary}
+Memory is solved: the kernel can find free RAM, give each program its own private view of it, and
+hand out individual bytes. Everything needed for real processes is now in place. That is the next
+part.
+\end{summary}

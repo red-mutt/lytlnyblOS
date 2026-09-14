@@ -1,0 +1,433 @@
+\part{Booting}
+
+\chapter{From the power button to the first instruction}
+
+\begin{goals}
+  \item What the firmware does before anything of yours exists
+  \item How the BIOS decides where to boot from
+  \item What the \hexa{AA55} signature is and why nothing boots without it
+\end{goals}
+
+\section{The first few milliseconds}
+
+You press the button. The processor initialises with fixed values: \reg{CS} holds \hexa{F000},
+\reg{EIP} holds \hexa{FFF0}, and it is in \term{real mode}, behaving like an 8086 from 1978.
+
+At the resulting address there is a jump into the BIOS code. From there, the firmware does its
+work:
+
+\begin{enumerate}
+  \item \term{POST} (Power-On Self Test): check that RAM responds, that a keyboard exists, that
+        disks answer.
+  \item Initialise the basic controllers: interrupt controller, timer, disk controller.
+  \item Install its own service table in low memory, so software can ask it for things.
+  \item Look for a device to boot from.
+\end{enumerate}
+
+\section{How the boot device is chosen}
+
+The BIOS walks the devices in the configured order. From each one it reads the first sector ---
+512 bytes --- and checks exactly one thing: that \hi{the last two bytes are \hexa{55} and
+\hexa{AA}} (which read as a little-endian 16-bit number form \hexa{AA55}).
+
+If the signature is there, the BIOS considers that sector bootable: it copies it to address
+\hexa{7C00} and jumps there. If not, it moves to the next device.
+
+\begin{concept}{The contract is two bytes long}
+That is the entire contract between firmware and your operating system: 512 bytes ending in
+\hexa{AA55}. There is no file format, no header, no integrity check. The BIOS loads those bytes and
+jumps. What happens next is entirely your responsibility.
+\end{concept}
+
+That is why the last line of the lytlnyblOS bootloader is exactly this:
+
+\filetag{lytlnybl/boot/bootloader.asm}
+\begin{lstlisting}[style=asm]
+times 510-($-$$) db 0   ; pad with zeros up to byte 510
+dw 0xAA55               ; the magic signature in bytes 510 and 511
+\end{lstlisting}
+
+\cod{\$} means ``the current address'' and \cod{\$\$} ``the start address of the section'', so
+\cod{\$-\$\$} is ``how many bytes I have written so far''. The directive pads with zeros up to 510
+and then places the signature. If your code went past 510 bytes, NASM would error out on a negative
+count: it is a hard limit.
+
+\begin{warn}{Why \hexa{7C00} and nowhere else}
+The address \hexa{7C00} is a relic of the original IBM PC 5150, which had 32 KB of RAM. The
+designers wanted the boot sector as high as possible without touching the last kilobyte (reserved),
+and \hexa{7C00} is exactly $32\,\text{KB} - 1024$. Forty-five years later, that number is still
+there.
+\end{warn}
+
+% ============================================================
+\chapter{The 512 bytes of the bootloader}
+
+\begin{goals}
+  \item Read the complete lytlnyblOS bootloader and understand every line
+  \item Understand 16-bit segmentation and the \cod{segment$\times$16 + offset} calculation
+  \item Know why the bootloader has to care about the \reg{DS} register
+\end{goals}
+
+\section{The whole program}
+
+Before dissecting it, look at the overall shape. The lytlnyblOS bootloader does four things, in
+this order:
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize,
+  b/.style={draw=accent,fill=accentlight,rounded corners=3pt,minimum width=3.2cm,minimum height=0.95cm,align=center}]
+  \node[b] (a) {Say hello\\{\tiny print\_string}};
+  \node[b,right=0.5cm of a] (c) {Ask for the\\memory map\\{\tiny int 15h / E820}};
+  \node[b,right=0.5cm of c] (d) {Load the kernel\\{\tiny int 13h}};
+  \node[b,right=0.5cm of d] (e) {Jump to it\\{\tiny jmp 0900h:0000}};
+  \foreach \x/\y in {a/c,c/d,d/e} \draw[-{Stealth[length=2.2mm]},accent,thick] (\x)--(\y);
+\end{tikzpicture}
+\end{center}
+
+\filetag{lytlnybl/boot/bootloader.asm}
+\begin{lstlisting}[style=asm]
+start:
+    mov ax, 07C0h
+    mov ds, ax          ; DS = 0x07C0, so that labels resolve correctly
+
+    mov si, title_string
+    call print_string
+
+    mov si, message_string
+    call print_string
+
+    call store_memory_map
+    call load_kernel_from_disk
+
+    jmp 0900h:0000      ; jump to the kernel, loaded at physical address 0x9000
+\end{lstlisting}
+
+Twelve lines and the system is already in motion. Let us understand the first two, which are the
+most confusing.
+
+\section{16-bit segmentation: why \hexa{07C0}}
+
+In real mode the processor has 16-bit registers. With 16 bits you can only count to 65,535, that
+is 64 KB. But the 8086 wanted to address 1 MB. Intel's solution was to combine \emph{two} 16-bit
+registers:
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\small]
+  \node[draw=purple,fill=purplelight,rounded corners=2pt,minimum width=2.9cm,minimum height=0.8cm] (seg) at (0,0) {segment};
+  \node[font=\Large,text=gray] at (1.95,0) {$\times\,16$};
+  \node[font=\Large,text=gray] at (3.4,0) {$+$};
+  \node[draw=accent,fill=accentlight,rounded corners=2pt,minimum width=2.6cm,minimum height=0.8cm] (off) at (5.5,0) {offset};
+  \node[font=\Large,text=gray] at (7.4,0) {$=$};
+  \node[draw=green,fill=greenlight,rounded corners=2pt,minimum width=3.6cm,minimum height=0.8cm] (fis) at (10.0,0) {physical address};
+\end{tikzpicture}
+\end{center}
+
+Multiplying by 16 is the same as shifting four bits left, that is, adding a hex zero. So:
+
+\begin{center}
+\cod{07C0} $\times$ 16 = \cod{7C00} \qquad and \qquad \cod{7C00} + \cod{0000} = \cod{7C00}
+\end{center}
+
+Which is exactly where the BIOS left our code. By setting \reg{DS} = \hexa{07C0}, any label such as
+\cod{title\_string} (which the assembler turns into a small offset, say \hexa{6E}) resolves to
+physical address \hexa{7C6E}: the right place.
+
+\begin{danger}{If you forget to set DS}
+If you do not initialise \reg{DS}, it holds whatever the BIOS left there, usually 0. Then
+\cod{title\_string} would resolve to physical address \hexa{6E}, which is in the middle of the
+interrupt vector table. You would print garbage --- or hang the machine. It is the number one
+mistake of anyone writing their first bootloader, and it produces no message at all: it simply does
+not work.
+\end{danger}
+
+\begin{warn}{Same place, many names}
+An odd consequence of this scheme is that one physical address has many representations:
+\cod{07C0:0000}, \cod{0000:7C00} and \cod{0700:0C00} all point at \hexa{7C00}. It is not a design
+error; it is what happens when segments overlap every 16 bytes.
+\end{warn}
+
+\section{Printing without an operating system}
+
+There is no video driver yet, so we use a BIOS service. They are invoked with \cod{int}, after
+putting the function number in \reg{AH}.
+
+\filetag{lytlnybl/boot/bootloader.asm}
+\begin{lstlisting}[style=asm]
+print_string:
+    mov ah, 0Eh         ; video service function 0x0E: teletype output
+print_char:
+    lodsb               ; AL = [DS:SI], then SI = SI + 1
+    cmp al, 0           ; end of string?
+    je printing_finished
+    int 10h             ; BIOS video service: print AL
+    jmp print_char
+printing_finished:
+    mov al, 10d         ; line feed
+    int 10h
+    mov ah, 03h         ; read cursor position
+    mov bh, 0
+    int 10h
+    mov ah, 02h         ; set cursor position
+    mov dl, 0           ; column 0
+    int 10h
+    ret
+\end{lstlisting}
+
+The \cod{lodsb} instruction is an x86 shorthand: load into \reg{AL} the byte pointed at by
+\cod{DS:SI} and increment \reg{SI}. It is exactly the equivalent of \cod{c = *p++;} in C, in a
+single instruction.
+
+The end of the routine has an amusing historical detail: code 10 is only a \emph{line feed}, which
+moves down a row but does not return to the left margin. So afterwards you must read the cursor
+position and set the column to 0 by hand. A direct inheritance from typewriters.
+
+\exercise{Why does \cod{print\_string} use \reg{SI} and not, say, \reg{BX} to walk the string?
+Hint: look at which register \cod{lodsb} uses implicitly.}
+
+% ============================================================
+\chapter{Reading the disk and loading the kernel}
+
+\begin{goals}
+  \item What CHS addressing is and why it still exists
+  \item How to ask the BIOS to read sectors
+  \item Why the kernel is loaded at \hexa{9000}
+\end{goals}
+
+\section{Service \hexa{13}}
+
+The BIOS offers disk access through interrupt \hexa{13}. Function 2 reads sectors, and expects its
+parameters spread across half the register file:
+
+\filetag{lytlnybl/boot/bootloader.asm}
+\begin{lstlisting}[style=asm]
+load_kernel_from_disk:
+    mov ax, 0900h
+    mov es, ax          ; ES = 0x0900 -> destination physical address 0x9000
+
+    mov ah, 02h         ; function 2: read sectors
+    mov al, 60          ; how many sectors to read
+
+    mov ch, 0h          ; cylinder 0
+    mov cl, 02h         ; sector 2 (counting starts at 1!)
+    mov dh, 0h          ; head 0
+    mov dl, 80h         ; drive 0x80 = first hard disk
+
+    mov bx, 0h          ; destination offset -> ES:BX = 0900:0000
+
+    int 13h
+    jc kernel_load_error  ; the BIOS sets the carry flag on failure
+    ret
+\end{lstlisting}
+
+\subsection{CHS: cylinder, head, sector}
+
+Old disks were spinning platters and were addressed by their physical geometry: \term{cylinder}
+(which ring), \term{head} (which side of the platter) and \term{sector} (which slice of the ring).
+Today disks are electronic and that geometry is fictional, but the interface persists for
+compatibility.
+
+\begin{warn}{Sectors start at 1}
+In CHS, cylinders and heads are numbered from 0, but \hi{sectors are numbered from 1}. So
+\cod{cl = 2} means ``the second sector of the disk'', the first one \emph{after} the boot sector.
+This inconsistency has caused countless bugs since 1983.
+\end{warn}
+
+\subsection{Where it loads}
+
+\reg{ES}:\reg{BX} gives the destination. With \reg{ES} = \hexa{0900} and \reg{BX} = 0, the physical
+address is \hexa{9000}. Why there? Look back at the memory map in Chapter 4:
+
+\begin{itemize}
+  \item below \hexa{500} sit the interrupt vector table and BIOS data: untouchable;
+  \item at \hexa{7C00} we are ourselves: we cannot write over our own running code;
+  \item from \hexa{A0000} onwards begins video memory.
+\end{itemize}
+
+\hexa{9000} is comfortably free, leaves plenty of room below and above, and allows loading up to
+\hexa{A0000} (some 60 KB) without hitting anything.
+
+\begin{concept}{Why 60 sectors}
+$60 \times 512 = 30{,}720$ bytes. The figure is hand-picked: enough for the current kernel
+($\sim$23 KB) with headroom, and short of the 63-sectors-per-track limit that a single CHS read
+imposes. If the kernel grew further, this number would have to grow \emph{and} you would have to
+watch that the read does not cross a track boundary.
+\end{concept}
+
+\section{The final jump}
+
+\begin{lstlisting}[style=asm]
+jmp 0900h:0000
+\end{lstlisting}
+
+This is a \term{far jump}: besides changing \reg{IP}, it changes \reg{CS}. Changing both matters,
+because the kernel code will compute its own addresses assuming \reg{CS} holds \hexa{0900}. From
+this instruction on, the bootloader has finished its job and the kernel is in control.
+
+\begin{recipe}{editing the boot sector}{ch12-bootloader}
+The real bootloader with four marked edits: your own message, two characters printed with the BIOS
+teletype call directly, and a pause using \cod{INT 15h / AH=86h} so you can read the result before
+the kernel clears the screen.
+
+It still loads the kernel and jumps to it, so the system boots normally afterwards. Watch the
+\cod{times 510-(\$-\$\$)} line at the bottom: add too much and NASM fails with a negative count,
+which is the 512-byte limit enforcing itself.
+\end{recipe}
+
+\begin{tryit}[Watch the real boot]
+Build and run with \cod{make run}. You will see, in order:
+\begin{lstlisting}[style=txt]
+Welcome to the lytlnybl bootloader!
+Loading up the kernel for you...
+Hello World!, i am lytlnyblOS, in real mode
+\end{lstlisting}
+The first two are printed by the bootloader from \hexa{7C00}. The third is already printed by the
+kernel from \hexa{9000}, still in real mode. If you see all three, the disk load worked.
+\end{tryit}
+
+% ============================================================
+\chapter{The E820 memory map}
+
+\begin{goals}
+  \item Why the kernel cannot guess how much RAM exists
+  \item How the map is requested from the BIOS
+  \item How it is stored so the kernel can find it later
+\end{goals}
+
+\section{The problem}
+
+The kernel needs to know which memory regions it may use. It cannot assume: every machine has a
+different amount of RAM and holes in different places (memory reserved by the BIOS, by ACPI, by
+memory-mapped devices).
+
+There is only one moment when you can ask: \hi{while still in real mode}, because as soon as
+we enter protected mode we lose access to BIOS services. That is why this job belongs to the
+bootloader, even though the kernel is the one that needs the data.
+
+\section{How you ask}
+
+The service is called E820 and works by iteration: you call it in a loop and each call returns one
+region, until it says it is done.
+
+\filetag{lytlnybl/boot/bootloader.asm}
+\begin{lstlisting}[style=asm]
+store_memory_map:
+    xor ax, ax
+    mov ds, ax          ; DS = 0, to work with absolute addresses
+
+    xor ebx, ebx        ; EBX = 0 means "first call"
+    xor bp, bp          ; BP will count the entries
+
+    mov di, memory_map_buffer   ; ES:DI = where to write (0x5000)
+next_entry:
+    mov ax, 0
+    mov es, ax
+
+    mov eax, 0xE820
+    mov edx, 0x534D4150 ; 'SMAP' in ASCII: mandatory signature
+    mov ecx, 24         ; size of each entry, in bytes
+
+    int 15h
+    jc done             ; carry = no more entries
+
+    add di, 24          ; advance the write pointer
+    inc bp              ; one more entry
+
+    test ebx, ebx       ; did EBX return to 0? then that was the last
+    jnz next_entry
+done:
+    mov [memory_map_entries], bp
+    mov ax, 07C0h
+    mov ds, ax          ; restore DS before returning
+    ret
+\end{lstlisting}
+
+Details worth noticing:
+
+\begin{description}
+  \item[\reg{EBX} is the loop state] The BIOS uses it as a bookmark. You start at 0, it returns a
+    value you must keep untouched for the next call, and when it returns to 0 the iteration is
+    over. Touch \reg{EBX} between calls and you break the loop.
+  \item[The \cod{'SMAP'} signature] \hexa{534D4150} is ``SMAP'' in ASCII. The BIOS checks it to
+    distinguish this request from other \hexa{15} service functions.
+  \item[\reg{DS} temporarily becomes 0] Because we want to write to absolute address \hexa{5000}.
+    With \reg{DS}=0, \cod{di = 0x5000} points exactly there. It must be restored afterwards, or the
+    rest of the bootloader prints garbage.
+\end{description}
+
+\section{The format of each entry}
+
+Each entry occupies 24 bytes:
+
+\begin{center}
+\begin{tabularx}{0.95\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Offset} & \textbf{Size} & \textbf{Field} \\
+\midrule
+0  & 8 bytes & Base address of the region \\
+8  & 8 bytes & Length in bytes \\
+16 & 4 bytes & Type: \textbf{1 = usable}, anything else = reserved \\
+20 & 4 bytes & Extended attributes (we do not use them) \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+And in C, the kernel reads it with a structure that mirrors that layout:
+
+\filetag{lytlnybl/include/memory/pmm.h}
+\begin{lstlisting}[style=c]
+typedef struct {
+    uint64_t base;
+    uint64_t length;
+    uint32_t type;
+    uint32_t acpi_extended;
+} __attribute__((packed)) memory_map_entry_t;
+\end{lstlisting}
+
+\begin{concept}{What \cod{\_\_attribute\_\_((packed))} does}
+By default the compiler inserts padding between struct fields to align them and make access
+faster. That is fine for internal structures, but disastrous when the structure must mirror a
+layout defined by hardware or by another program. \cod{packed} tells the compiler: ``add no
+padding, lay the fields out back to back''. It is used in every structure representing an external
+format: GDT entries, IDT entries, the TSS, and the filesystem structures.
+\end{concept}
+
+\section{The agreement between bootloader and kernel}
+
+The bootloader writes to two fixed addresses and the kernel reads them from there:
+
+\begin{center}
+\begin{tabularx}{0.9\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Address} & \textbf{Size} & \textbf{Contents} \\
+\midrule
+\hexa{4FFC} & 2 bytes & Number of entries in the map \\
+\hexa{5000} & $24 \times n$ & The entries themselves \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\filetag{lytlnybl/memory/pmm.c}
+\begin{lstlisting}[style=c]
+void init_pmm() {
+    uint16_t map_entry_count = *(uint16_t*)0x4FFC;
+    memory_map_entry_t* memory_map = (memory_map_entry_t*)0x5000;
+    /* ... */
+}
+\end{lstlisting}
+
+\begin{warn}{Coupling through magic numbers}
+This is a fragile agreement: two different files, written in different languages, agreeing on a
+constant typed by hand in both. If someone changes \hexa{5000} in the bootloader and forgets to
+change it in \cod{pmm.c}, the kernel will read garbage as if it were a memory map and conclude that
+it may use regions that do not exist.
+
+Serious systems solve this with a documented boot protocol (Multiboot, for example) in which the
+loader passes a pointer to a structure in a register. For a teaching system the shared constant is
+acceptable --- but it is worth knowing it is technical debt.
+\end{warn}
+
+\begin{summary}
+The bootloader has done its job: the kernel sits at \hexa{9000}, the memory map sits at \hexa{5000},
+and control has just jumped into kernel code. But we are still in real mode, 16-bit, with no
+protection at all. The next part changes that.
+\end{summary}

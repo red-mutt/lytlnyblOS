@@ -1,0 +1,602 @@
+\part{Interrupts: the axis of everything}
+
+\chapter{What an interrupt is}
+
+\begin{goals}
+  \item Why a system without interrupts cannot be an operating system
+  \item The three kinds of interrupt and how they differ
+  \item What the processor does automatically when one fires
+\end{goals}
+
+\section{The problem}
+
+Suppose the kernel wants to know when a key is pressed. Without interrupts there is only one
+option: ask, over and over, forever.
+
+\begin{lstlisting}[style=c]
+for (;;) {
+    if (key_available()) handle_key();
+    if (timer_expired()) switch_process();
+    if (disk_ready())    finish_read();
+    /* ... and the real work? there is no room for it ... */
+}
+\end{lstlisting}
+
+That loop has two fatal defects. It burns 100\,\% of the processor asking questions whose answer is
+almost always ``no''. And it only works if the running code cooperates: if a user program enters
+\cod{while(1);}, the loop never runs again and the machine is lost.
+
+\begin{concept}{What an interrupt gives you}
+An interrupt lets the hardware \hi{take the processor away} from whatever is running,
+without its permission and without its cooperation, and hand it to a kernel routine. That single
+capability is what makes preemptive multitasking, device handling, error recovery and system calls
+possible. Everything.
+\end{concept}
+
+\section{Three kinds}
+
+The processor treats all three the same way, but they originate differently:
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Kind} & \textbf{Numbers} & \textbf{Origin} \\
+\midrule
+\term{Exceptions} & 0--31 & The processor itself, when an instruction cannot complete: divide by zero, invalid opcode, page fault \\
+\term{Hardware interrupts (IRQ)} & 32--47 & An external device raising a line: timer, keyboard, disk \\
+\term{Software interrupts} & any, we use \hexa{80} & The program itself, executing \cod{int n} on purpose \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+The difference matters for how you respond. An exception means something went wrong \emph{now}:
+either you fix it (a page fault whose page can be brought in) or you kill the culprit. A hardware
+interrupt means a device has news. A software interrupt means a program is asking for a service.
+
+\section{What the processor does by itself}
+
+When an interrupt fires, the processor performs a fixed sequence \emph{in hardware}, before a
+single instruction of yours runs:
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize,
+  p/.style={draw=amber,fill=amberlight,rounded corners=2pt,minimum width=9.4cm,minimum height=0.68cm,align=left,inner xsep=8pt}]
+  \node[p] (a) {1. Finish (or abort) the current instruction};
+  \node[p,below=0.22cm of a] (b) {2. Look up entry $n$ in the IDT};
+  \node[p,below=0.22cm of b] (c) {3. \textbf{If coming from ring 3: switch to the kernel stack from the TSS}};
+  \node[p,below=0.22cm of c] (d) {4. Push SS and ESP (only if the ring changed)};
+  \node[p,below=0.22cm of d] (e) {5. Push EFLAGS, CS and EIP};
+  \node[p,below=0.22cm of e] (f) {6. Push an error code (only some exceptions)};
+  \node[p,below=0.22cm of f] (g) {7. Clear IF (with an interrupt gate) and jump to the handler};
+  \foreach \x/\y in {a/b,b/c,c/d,d/e,e/f,f/g} \draw[-{Stealth[length=2mm]},amber] (\x)--(\y);
+\end{tikzpicture}
+\end{center}
+
+Step 3 is the one that makes user space possible, and it is worth dwelling on. If the interrupted
+code was running in ring 3, its stack is a user stack --- untrusted, possibly corrupt, possibly
+unmapped. The kernel cannot run on it. So the processor automatically switches to a kernel stack
+whose address it reads from a structure called the TSS. Part X covers this in detail.
+
+\begin{warn}{Not every exception pushes an error code}
+Exceptions 8, 10, 11, 12, 13, 14 and 17 push an extra 32-bit value describing what went wrong. The
+others do not. That inconsistency forces the assembly stubs to push a fake zero for the ones that
+do not, so that the stack layout is identical in all cases. You will see exactly that trick in
+Chapter 21.
+\end{warn}
+
+% ============================================================
+\chapter{The IDT: the table of handlers}
+
+\begin{goals}
+  \item What the Interrupt Descriptor Table is and how it is laid out
+  \item How to build a gate descriptor
+  \item What the difference between \hexa{8E} and \hexa{EE} is, and why it matters enormously
+\end{goals}
+
+\section{256 entries}
+
+The \term{IDT} is an array of 256 descriptors, one per interrupt number. Each entry says which
+address to jump to and under what conditions.
+
+\filetag{lytlnybl/include/kernel/interrupts.h}
+\begin{lstlisting}[style=c]
+typedef struct {
+    uint16_t offset_low;    /* bits 15..0 of the handler address */
+    uint16_t selector;      /* code segment selector: 0x08 */
+    uint8_t  reserved;      /* always 0 */
+    uint8_t  flags;         /* type and privileges */
+    uint16_t offset_high;   /* bits 31..16 of the handler address */
+} __attribute__((packed)) idt_entry_t;
+\end{lstlisting}
+
+Note the handler address is split in two halves with other fields in between --- the same
+historical mess as the GDT. Filling it in means splitting the address by hand:
+
+\filetag{lytlnybl/kernel/interrupts.c}
+\begin{lstlisting}[style=c]
+void idt_set_gate(uint8_t interrupt, uint32_t handler_address,
+                  uint16_t selector, uint8_t flags) {
+    idt[interrupt].offset_low  = handler_address & 0xFFFF;
+    idt[interrupt].selector    = selector;
+    idt[interrupt].reserved    = 0;
+    idt[interrupt].flags       = flags;
+    idt[interrupt].offset_high = (handler_address >> 16) & 0xFFFF;
+}
+\end{lstlisting}
+
+Chapter 2's idioms again: \cod{\& 0xFFFF} to keep the low half, \cod{>> 16} to extract the high
+half.
+
+\section{The flags byte}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}c l X@{}}
+\toprule
+\textbf{Bit} & \textbf{Name} & \textbf{Meaning} \\
+\midrule
+7 & P    & Present \\
+6--5 & DPL & \textbf{Minimum ring required to invoke this interrupt with \cod{int}} \\
+4 & S    & 0 for gates \\
+3--0 & Type & \hexa{E} = 32-bit interrupt gate, \hexa{F} = trap gate \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Which produces the two values used in the project:
+
+\begin{center}
+\begin{tabularx}{0.95\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Value} & \textbf{Binary} & \textbf{Meaning} \\
+\midrule
+\hexa{8E} & \cod{10001110} & Present, \textbf{DPL 0}, interrupt gate \\
+\hexa{EE} & \cod{11101110} & Present, \textbf{DPL 3}, interrupt gate \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\begin{concept}{Why the system call gate is \hexa{EE} and everything else \hexa{8E}}
+The DPL in an IDT entry answers one question: \emph{may a ring 3 program trigger this interrupt
+deliberately with \cod{int n}?}
+
+For the CPU exceptions and the hardware IRQs the answer must be no. If a user program could execute
+\cod{int 14} it would fake a page fault and confuse the kernel into examining a \reg{CR2} that has
+nothing to do with reality. Hence DPL 0, hence \hexa{8E}.
+
+For \cod{int 0x80} the answer must be yes: it is precisely how a program requests a service. Hence
+DPL 3, hence \hexa{EE}.
+
+\hi{That single hex digit is the difference between having system calls and having a
+completely inaccessible kernel.} Getting it wrong in either direction is a classic bug: set them
+all to \hexa{8E} and every system call becomes a protection fault; set them all to \hexa{EE} and
+any program can forge exceptions.
+\end{concept}
+
+\filetag{lytlnybl/kernel/interrupts.c}
+\begin{lstlisting}[style=c]
+idt_set_gate(0,  (uint32_t)isr0,  0x08, 0x8E);   /* divide by zero */
+idt_set_gate(14, (uint32_t)isr14, 0x08, 0x8E);   /* page fault */
+idt_set_gate(32, (uint32_t)irq0,  0x08, 0x8E);   /* timer */
+idt_set_gate(33, (uint32_t)irq1,  0x08, 0x8E);   /* keyboard */
+/* ... */
+idt_set_gate(0x80, (uint32_t)syscall_entry, 0x08, 0xEE); /* system calls */
+\end{lstlisting}
+
+\section{Interrupt gate versus trap gate}
+
+The only difference: an \term{interrupt gate} clears \reg{IF} on entry (interrupts disabled inside
+the handler), a \term{trap gate} does not.
+
+lytlnyblOS uses interrupt gates for everything, including system calls. That means \hi{the
+kernel is not reentrant}: while a system call is running, no timer interrupt can fire, so no
+process switch can preempt it. That simplifies the code enormously --- no locks, no races --- at
+the price of latency: a slow system call blocks the whole system.
+
+\begin{warn}{A consequence you will meet later}
+Because system calls run with interrupts disabled, the kernel can manipulate process lists,
+page directories and the TSS without worrying about being interrupted halfway. Several places in
+this codebase rely on that implicitly. Anyone thinking of switching to trap gates would have to
+audit all of them first.
+\end{warn}
+
+\section{Loading the table}
+
+Like the GDT, the IDT is registered through a small descriptor holding base and limit:
+
+\begin{lstlisting}[style=c]
+idtr.limit = sizeof(idt) - 1;    /* 256 * 8 - 1 = 2047 */
+idtr.base  = (uint32_t)idt;
+idt_load(&idtr);
+\end{lstlisting}
+
+\begin{lstlisting}[style=asm]
+idt_load:
+    mov eax, [esp + 4]
+    lidt [eax]
+    ret
+\end{lstlisting}
+
+The same ``minus one'' as the GDT. And notice \cod{memset(idt, 0, sizeof(idt))} at the start of
+\cod{idt\_init}: the 200-odd unused entries are left at zero, which means ``not present''. If any
+of them ever fires, the processor raises a general protection fault rather than jumping into
+garbage. Zeroing is what makes that safe.
+
+% ============================================================
+\chapter{Interrupt service routines}
+
+\begin{goals}
+  \item Why handlers cannot be written directly in C
+  \item How the assembly stubs build a uniform stack frame
+  \item How \cod{registers\_t} maps onto that frame, and why it is the key to everything
+\end{goals}
+
+\section{Why C is not enough}
+
+An interrupt handler is not a normal function. It must:
+
+\begin{itemize}
+  \item preserve \emph{every} register, because it interrupted arbitrary code at an arbitrary
+        point;
+  \item end with \cod{iret} instead of \cod{ret}, because the stack holds \reg{EIP}, \reg{CS} and
+        \reg{EFLAGS}, not just a return address;
+  \item cope with the fact that some exceptions pushed an error code and others did not.
+\end{itemize}
+
+C can express none of that. So each of the 48 entry points is a small assembly stub that normalises
+the situation and then calls a C function.
+
+\section{The two macros}
+
+\filetag{lytlnybl/kernel/interrupts.asm}
+\begin{lstlisting}[style=asm]
+%macro ISR_NOERRCODE 1
+isr%1:
+    push dword 0        ; FAKE error code, so the layout always matches
+    push dword %1       ; the interrupt number
+    jmp isr_common_stub
+%endmacro
+
+%macro ISR_ERRCODE 1
+isr%1:
+                        ; the processor already pushed the error code
+    push dword %1       ; just the interrupt number
+    jmp isr_common_stub
+%endmacro
+\end{lstlisting}
+
+That fake zero is the whole trick. After either macro runs, the stack looks identical regardless of
+whether the exception provided an error code --- so a single C function can handle all 32.
+
+\begin{lstlisting}[style=asm]
+ISR_NOERRCODE 0     ; divide by zero: no error code
+ISR_NOERRCODE 1
+...
+ISR_ERRCODE   8     ; double fault: has an error code
+ISR_NOERRCODE 9
+ISR_ERRCODE   10    ; invalid TSS
+ISR_ERRCODE   11
+ISR_ERRCODE   12
+ISR_ERRCODE   13    ; general protection fault
+ISR_ERRCODE   14    ; page fault
+\end{lstlisting}
+
+\section{The common stub}
+
+\filetag{lytlnybl/kernel/interrupts.asm}
+\begin{lstlisting}[style=asm]
+isr_common_stub:
+    pusha               ; push EAX,ECX,EDX,EBX,ESP,EBP,ESI,EDI in one go
+
+    mov ax, ds
+    push eax            ; save the data segment
+
+    push esp            ; the argument: a pointer to everything we just built
+    call isr_handler
+    add esp, 4          ; discard the argument
+
+    pop eax             ; restore DS (as part of EAX)
+
+    popa                ; restore the eight registers
+
+    add esp, 8          ; discard interrupt number and error code
+    iret                ; return: pops EIP, CS, EFLAGS (and SS, ESP if the ring changed)
+\end{lstlisting}
+
+\begin{concept}{\cod{push esp} is the most important line in the file}
+Right before the call, \reg{ESP} points at the lowest byte of everything the stub and the processor
+have pushed. Pushing \reg{ESP} therefore passes to C \hi{a pointer to the complete saved
+state of the interrupted code}.
+
+From C, that pointer is a \cod{registers\_t*}. And because it points at the real stack, \emph{it is
+not a copy}: if C modifies a field of that structure, it modifies what \cod{popa} and \cod{iret}
+will restore. Changing \cod{regs->eip} changes where execution resumes. Changing \cod{regs->eax}
+changes the value the interrupted code sees in \reg{EAX}.
+
+This is how system calls return a value. And it is how the context switch works: to switch process,
+the kernel simply overwrites every field of that structure with another process's saved values, and
+lets \cod{iret} do the rest.
+\end{concept}
+
+\section{The \cod{registers\_t} structure}
+
+The structure must match the stack layout exactly, and in reverse order --- the last thing pushed
+sits at the lowest address, so it comes first in the struct:
+
+\filetag{lytlnybl/include/kernel/interrupts.h}
+\begin{lstlisting}[style=c]
+typedef struct {
+    uint32_t ds;                /* pushed by the stub */
+
+    uint32_t edi, esi, ebp, esp; /* pushed by pusha */
+    uint32_t ebx, edx, ecx, eax;
+
+    uint32_t interrupt_number;  /* pushed by the macro */
+    uint32_t error_code;        /* pushed by the macro or by the CPU */
+
+    uint32_t eip;               /* pushed by the processor */
+    uint32_t cs;
+    uint32_t eflags;
+
+    uint32_t user_esp;          /* only if the ring changed */
+    uint32_t ss;
+} registers_t;
+\end{lstlisting}
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize,x=1cm,y=1cm]
+  \def\w{5.6}
+  \newcommand{\fila}[4]{%
+    \fill[#3,draw=grayborder] (0,#1) rectangle (\w,#1+0.52);
+    \node[font=\ttfamily\scriptsize] at (\w/2,#1+0.26) {#2};
+    \node[anchor=west,font=\sffamily\tiny,text=gray] at (\w+0.2,#1+0.26) {#4};}
+
+  \fila{0}{ds}{accentlight}{lowest address --- ESP points here}
+  \fila{0.52}{edi esi ebp esp}{accentlight}{}
+  \fila{1.04}{ebx edx ecx eax}{accentlight}{pushed by \texttt{pusha}}
+  \fila{1.56}{interrupt\_number}{amberlight}{pushed by the macro}
+  \fila{2.08}{error\_code}{amberlight}{macro or processor}
+  \fila{2.60}{eip}{redlight}{}
+  \fila{3.12}{cs}{redlight}{pushed by the processor}
+  \fila{3.64}{eflags}{redlight}{}
+  \fila{4.16}{user\_esp}{greenlight}{}
+  \fila{4.68}{ss}{greenlight}{only if ring 3 $\rightarrow$ ring 0}
+  \draw[-{Stealth[length=2.5mm]},red,thick] (-1.4,0.26) -- (-0.1,0.26);
+  \node[anchor=east,font=\sffamily\scriptsize,text=red] at (-1.5,0.26) {ESP};
+\end{tikzpicture}
+\end{center}
+
+\begin{warn}{The two last fields are conditional}
+\cod{user\_esp} and \cod{ss} only exist on the stack if the interrupt came from ring 3. If the
+kernel interrupts itself, the processor does not switch stacks and pushes nothing extra --- so
+those fields of the struct point at whatever happened to be above. That is why the context-saving
+code checks the process type before touching them:
+\begin{lstlisting}[style=c]
+if (process->type == PROCESS_KERNEL) {
+    process->regs.esp = regs->esp;      /* from pusha */
+} else {
+    process->regs.esp = regs->user_esp; /* pushed by the processor */
+    process->regs.ss  = regs->ss;
+}
+\end{lstlisting}
+Getting this wrong produces a bug that only shows up with user processes, and looks like random
+corruption.
+\end{warn}
+
+\section{The C handler}
+
+\filetag{lytlnybl/kernel/interrupts.c}
+\begin{lstlisting}[style=c]
+void isr_handler(registers_t* regs) {
+    switch (regs->interrupt_number) {
+        case 14:
+            page_fault_handler(regs);
+            break;
+        default:
+            vga_text_writeline(&terminal,
+                exception_messages[regs->interrupt_number]);
+            break;
+    }
+
+    if ((regs->cs & 3) == 3) {          /* did it come from user space? */
+        current_process->state = PROCESS_TERMINATED;
+        context_switch(current_process, get_next_process(), regs);
+        return;
+    }
+
+    for (;;);                           /* kernel fault: stop dead */
+}
+\end{lstlisting}
+
+The test \cod{(regs->cs \& 3) == 3} reads the RPL of the saved code segment: if it is 3, the fault
+came from a user program. The policy is then clear: kill the program and switch to another. The
+system survives.
+
+If the fault came from the kernel itself, there is no safe recovery, so it halts in an infinite
+loop. That is deliberate: a frozen system with a message on screen is far easier to debug than one
+that keeps running in a corrupt state.
+
+\begin{warn}{The reboot loop this cannot catch}
+Notice that the \cod{for(;;)} is only reached \emph{after} printing. If printing itself faults ---
+as in the divide-by-zero scenario from Chapter 20 --- the handler never gets there, and the
+exception recurses until the stack runs out. A production kernel would use a separate,
+pre-allocated fault stack and a panic routine that writes to screen without calling anything. Part
+XIII revisits this.
+\end{warn}
+
+% ============================================================
+\begin{recipe}{adding an interrupt vector of your own}{ch21-custom-interrupt}
+Adds vector \hexa{30} to the IDT in the three places it has to go: an assembly stub (C cannot end a
+function with \cod{iret}), a declaration so C can take its address, and the \cod{idt\_set\_gate}
+call plus a handler.
+
+Then it fires \cod{int \$0x30} with a known value in \reg{EBX}, and the handler overwrites
+\cod{regs->ebx}. The value that comes back is the handler's, not the caller's --- demonstrating on
+a vector you built yourself the exact mechanism a system call uses to return a result.
+
+Note the handler ends with \cod{return}, not \cod{break}: the code after the switch halts the
+kernel forever, which is right for a fault and wrong for a deliberate interrupt.
+\end{recipe}
+
+% ============================================================
+\chapter{The PIC: routing hardware interrupts}
+
+\begin{goals}
+  \item What the 8259 controller does and why there are two of them
+  \item Why they must be remapped before anything else
+  \item What the End Of Interrupt is and what happens if you forget it
+\end{goals}
+
+\section{The chip}
+
+Devices do not signal the processor directly: they raise a line on a \term{Programmable Interrupt
+Controller} (PIC), which arbitrates between them and tells the CPU which one won. The original PC
+had one, with 8 lines. The PC/AT added a second chained to line 2 of the first, giving 15 usable
+lines.
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize,
+  d/.style={draw=grayborder,fill=graylight,rounded corners=2pt,minimum width=1.9cm,minimum height=0.5cm},
+  p/.style={draw=accent,fill=accentlight,rounded corners=3pt,minimum width=2.1cm,minimum height=2.5cm,align=center}]
+
+  \node[d] (t) at (0,2.1) {Timer (IRQ0)};
+  \node[d] (k) at (0,1.4) {Keyboard (IRQ1)};
+  \node[d] (s) at (0,0.7) {Slave (IRQ2)};
+  \node[d] (c) at (0,0.0) {COM1 (IRQ4)};
+
+  \node[p] (m) at (3.6,1.05) {\textbf{Master}\\PIC 1\\{\tiny 0x20, 0x21}};
+  \node[p,minimum height=1.6cm] (sl) at (3.6,-1.9) {\textbf{Slave}\\PIC 2\\{\tiny 0xA0, 0xA1}};
+  \node[draw=red,fill=redlight,rounded corners=3pt,minimum width=1.8cm,minimum height=1.1cm] (cpu) at (7.4,1.05) {CPU};
+
+  \foreach \n in {t,k,s,c} \draw[-{Stealth[length=2mm]},gray] (\n) -- (m);
+  \draw[-{Stealth[length=2mm]},thick,purple] (sl) -- node[right,font=\tiny,text=gray]{via IRQ2} (m);
+  \draw[-{Stealth[length=2.5mm]},thick,red] (m) -- node[above,font=\tiny,text=gray]{INTR} (cpu);
+  \node[d,minimum width=1.7cm] at (0,-1.9) {Disk (IRQ14)};
+  \draw[-{Stealth[length=2mm]},gray] (0.9,-1.9) -- (sl);
+\end{tikzpicture}
+\end{center}
+
+\section{Why remapping is mandatory}
+
+By default, the master PIC sends IRQ0--7 as interrupt numbers 8--15. That was fine in 1981. It is a
+disaster in protected mode, because \hi{numbers 8--15 are already CPU exceptions}: 8 is
+double fault, 13 is general protection fault, 14 is page fault.
+
+Without remapping, a simple timer tick would arrive as ``double fault''. The kernel would print
+\cod{Double Fault} a hundred times a second and halt. It is one of the most confusing symptoms a
+beginner can hit, because the message is completely unrelated to the cause.
+
+The fix is to reprogram the PICs so they use free numbers: 32--39 for the master, 40--47 for the
+slave.
+
+\filetag{lytlnybl/kernel/interrupts.c}
+\begin{lstlisting}[style=c]
+pic_remap(0x20, 0x28);   /* 32 and 40 */
+\end{lstlisting}
+
+\section{The remapping sequence}
+
+The 8259 is configured by sending four \term{initialisation command words} in a fixed order:
+
+\filetag{lytlnybl/kernel/interrupts.c}
+\begin{lstlisting}[style=c]
+void pic_remap(int offset1, int offset2) {
+    uint8_t a1 = inb(PIC1_DATA);       /* save the current masks */
+    uint8_t a2 = inb(PIC2_DATA);
+
+    outb(PIC1_COMMAND, ICW1_INIT | ICW1_ICW4);  /* ICW1: start init */
+    io_wait();
+    outb(PIC2_COMMAND, ICW1_INIT | ICW1_ICW4);
+    io_wait();
+
+    outb(PIC1_DATA, offset1);          /* ICW2: vector offsets */
+    io_wait();
+    outb(PIC2_DATA, offset2);
+    io_wait();
+
+    outb(PIC1_DATA, 4);                /* ICW3: slave is on line 2 (bit 2 = 4) */
+    io_wait();
+    outb(PIC2_DATA, 2);                /* ICW3: slave identity = 2 */
+    io_wait();
+
+    outb(PIC1_DATA, ICW4_8086);        /* ICW4: 8086 mode */
+    io_wait();
+    outb(PIC2_DATA, ICW4_8086);
+    io_wait();
+
+    outb(PIC1_DATA, a1);               /* restore the masks */
+    outb(PIC2_DATA, a2);
+}
+\end{lstlisting}
+
+Three details worth noting:
+
+\begin{description}
+  \item[The \cod{io\_wait()} between every write] The 8259 is a chip from 1976. Modern processors
+    issue writes faster than it can process them. That delay is the trick from Chapter 5.
+  \item[ICW3 is asymmetric] The master is told \emph{which line} the slave is on as a bitmask
+    ($1 \ll 2 = 4$); the slave is told \emph{its own number} as a plain value (2). Same information,
+    two encodings. Pure 1970s design.
+  \item[Masks are saved and restored] Each PIC has a register saying which lines are enabled. The
+    initialisation sequence would clear it, so the code reads it first and puts it back afterwards.
+\end{description}
+
+\section{EOI: the acknowledgement you must not forget}
+
+When a device raises an interrupt, the PIC records that it is \emph{in service} and refuses to
+deliver any further interrupt of the same or lower priority until it is told the handler is done.
+That acknowledgement is the \term{End Of Interrupt}.
+
+\filetag{lytlnybl/kernel/interrupts.c}
+\begin{lstlisting}[style=c]
+void pic_send_eoi(uint8_t irq) {
+    if (irq >= 8)
+        outb(PIC2_COMMAND, PIC_EOI);   /* the slave too, if it came from there */
+    outb(PIC1_COMMAND, PIC_EOI);       /* always the master */
+}
+
+void irq_handler(registers_t* regs) {
+    switch (regs->interrupt_number - 32) {
+        case 0: timer_handler(regs); break;
+        case 1: keyboard_handler();  break;
+        case 2: break;
+    }
+    pic_send_eoi(regs->interrupt_number - 32);
+}
+\end{lstlisting}
+
+\begin{danger}{Forgetting the EOI}
+It is the classic beginner bug, and its symptom is deeply confusing: \hi{the interrupt fires
+exactly once and never again}. The keyboard registers one key and goes dead. The timer ticks once
+and multitasking never starts. Nothing crashes, no error appears --- the system simply stops
+reacting.
+
+Note also that the EOI must always go to the master, and \emph{additionally} to the slave if the
+IRQ came from there. Sending it only to the slave leaves the master permanently blocked.
+\end{danger}
+
+\begin{tryit}
+With the timer at 100 Hz, adding a counter that prints something every 100 ticks should print once
+per second. If it prints once and stops, the EOI is missing or misplaced. If it never prints, the
+PIC masks are blocking IRQ0 or \cod{sti} was never executed.
+\end{tryit}
+
+\section{Turning interrupts on}
+
+The last line of \cod{idt\_init} is:
+
+\begin{lstlisting}[style=c]
+asm volatile("sti");
+\end{lstlisting}
+
+\cod{sti} sets \reg{IF}. From this instant the system is interruptible: the timer will start firing,
+the keyboard will respond, and --- crucially --- the code that follows can be preempted at any
+moment.
+
+Everything before this point ran with interrupts off, in a single-threaded world where nothing could
+go wrong concurrently. Everything after it lives in a world where it can.
+
+\begin{summary}
+The kernel can now react to the outside world. The next part puts that to use with the two drivers
+that make an interactive system possible: the timer, which gives it a heartbeat, and the keyboard,
+which gives it ears.
+\end{summary}

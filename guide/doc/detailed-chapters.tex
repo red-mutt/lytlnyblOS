@@ -1,0 +1,357 @@
+\part{Detailed guided study}
+
+\chapter{Before changing code: the machine model}
+This chapter slows down and establishes the vocabulary that makes the rest of the source readable. A CPU is not a program that understands C functions or files. It repeatedly fetches bytes from the address named by its instruction pointer, decodes one instruction, executes it, and advances to the next instruction. A compiler translates C into those bytes; a linker chooses where groups of bytes will live and connects references between them.
+
+\section{Bits, bytes, words, and hexadecimal}
+A bit is either zero or one. Eight bits make a byte. The system uses 32-bit registers for most kernel work, so a natural machine word is four bytes. Hexadecimal is useful because one hex digit represents exactly four bits. For example, \texttt{0xB8000} is an address, not a magic string: it identifies the VGA text buffer. The suffix \texttt{h} used in NASM, such as \texttt{07C0h}, means the same thing.
+
+Do calculations explicitly while learning. A 4 KiB page is \(4096 = 2^{12}\) bytes, so its address has a 12-bit offset. Dividing an address by 4096 finds its page number; masking with \texttt{0xFFF} finds the byte offset within that page. When a function turns a page index back into an address, it multiplies by 4096. These are not arbitrary tricks: powers of two let the CPU use shifts and masks.
+
+\section{Registers and the stack}
+Registers are tiny storage locations inside the CPU. \texttt{EAX}, \texttt{EBX}, \texttt{ECX}, and \texttt{EDX} are general-purpose registers. \texttt{EIP} names the next instruction. \texttt{ESP} names the top of the current stack. \texttt{EBP} is commonly used as a stable reference inside a function. \texttt{CR0}, \texttt{CR2}, and \texttt{CR3} are control registers used for protected mode and paging.
+
+The stack is a region of memory used for return addresses, parameters, saved registers, and local variables. On 32-bit x86 it grows toward lower addresses. \texttt{push eax} subtracts four from \texttt{ESP} and stores \texttt{EAX}; \texttt{pop eax} loads from \texttt{ESP} and adds four. A \texttt{call} also pushes a return address. A \texttt{ret} pops that address into \texttt{EIP}. If code corrupts the stack, returning from a function can jump into arbitrary bytes.
+
+The C compiler and assembly agree on a calling convention. In this project, small assembly helpers receive their first C argument at \texttt{[esp + 4]} when entered. See \pathname{memory/vmm.asm}: \texttt{set\_cr3} reads its argument from there, writes it to \texttt{CR3}, and returns. The system-call trampoline uses the same stack positions to move four C arguments into registers before executing \texttt{int 0x80}.
+
+\section{Three address meanings}
+At different points in boot, a number can mean three different things.
+\begin{enumerate}
+\item A \emph{file offset} is a position inside the disk image. The boot sector is at offset zero.
+\item A \emph{physical address} names real RAM supplied by QEMU. BIOS loads the boot sector near \texttt{0x7C00}; this project loads the kernel at \texttt{0x9000}.
+\item A \emph{virtual address} is the address a running instruction uses after paging is enabled. It must be translated through page tables before RAM is reached.
+\end{enumerate}
+At startup, the kernel identity maps low memory, so physical and virtual addresses happen to have the same numeric value. Do not confuse equality in this early mapping with identity of the concepts. A user program at virtual \texttt{0x00400000} may be stored in any allocated physical frame.
+
+\section{The C runtime you do not get}
+Freestanding kernel C differs from a normal hosted C application. There is no operating system to call before yours starts, no default \texttt{main}, no standard I/O, and no automatic C library. This is why the build uses \texttt{-ffreestanding}, why the entry assembly calls \texttt{kernel\_main} directly, and why the repository implements its own text output and memory routines. Compiler-generated requirements still exist: C code needs a valid stack, correctly linked symbols, and sensible ABI rules.
+
+\exercise{In a notebook, calculate the physical address of \texttt{0x0900:0x0000} in real mode. Then calculate the offset of \texttt{0x00401234} within its 4 KiB page. Check both answers before continuing.}
+
+\chapter{A precise boot-to-C walkthrough}
+This chapter follows the actual first instructions in order. Keep \pathname{boot/bootloader.asm}, \pathname{kernel/kernel\_intro.asm}, and \pathname{kernel/linker.ld} open beside it.
+
+\section{Stage 1: BIOS gives the boot sector control}
+BIOS reads exactly one sector before it knows anything about your design. The source ends with \texttt{times 510-(\$-\$\$) db 0} and \texttt{dw 0xAA55}. The first directive fills unused space; the second puts the recognizable signature at bytes 510 and 511. The code begins by placing \texttt{0x07C0} in \texttt{DS}. Since \(0x07C0 * 16 = 0x7C00\), labels in this segment refer to the sector BIOS loaded.
+
+\texttt{print\_string} demonstrates a common assembly loop. \texttt{SI} points at a zero-terminated byte string. \texttt{lodsb} loads the next byte into \texttt{AL} and advances \texttt{SI}. A zero ends the loop; otherwise BIOS service \texttt{int 0x10} function \texttt{0x0E} prints the character. The routine returns to its caller with \texttt{ret}. At this point BIOS provides the output service; after protected mode, this interrupt interface is no longer the system's normal display API.
+
+\section{Stage 2: preserve information about RAM}
+\texttt{store\_memory\_map} invokes BIOS E820 repeatedly. \texttt{EBX} is a continuation value: zero starts the query, and BIOS changes it until it becomes zero at the last entry. Each returned record is 24 bytes. The bootloader puts records beginning at \texttt{0x5000} and writes the number of records at \texttt{0x4FFC}. It temporarily sets \texttt{DS} to zero so these absolute low-memory addresses are not shifted by the bootloader segment.
+
+This code assumes those low-memory locations are safe during this small boot sequence. A real boot protocol would define a fuller hand-off structure and carefully reserve it. The educational value is that memory discovery happens before a physical allocator exists; firmware is the only source of this information.
+
+\section{Stage 3: read the kernel}
+\texttt{load\_kernel\_from\_disk} asks BIOS disk service \texttt{0x13} to read 60 sectors. It sets \texttt{ES:BX} to \texttt{0x0900:0}, which is physical \texttt{0x9000}. It starts at CHS sector 2 because sector 1 contains the bootloader. The exact CHS values assume a simple QEMU geometry and a kernel that fits in the fixed read. The carry flag reports failure; the code branches to an error message if it is set.
+
+The limitation is important. The image eventually contains more than a kernel: it contains a filesystem beginning at a later sector. The bootloader does not understand it. It merely copies a fixed early region into RAM. Enlarging the kernel beyond 60 sectors can overwrite assumptions or leave part of the kernel on disk. Measure the size of \pathname{build/kernel.bin} before experimenting with this constant.
+
+\section{Stage 4: the second assembly entry}
+The far jump enters \pathname{kernel/kernel\_intro.asm}. The source is still 16-bit at its beginning. It again establishes a data segment, displays a last BIOS message, and then disables maskable interrupts with \texttt{cli}. Interrupts must remain off until an IDT exists; an interrupt at the wrong moment would use uninitialized descriptors.
+
+The GDT contains a null descriptor, kernel code/data descriptors, user code/data descriptors, and space for a TSS descriptor. \texttt{lgdt} loads the address and size of this table. Setting PE in \texttt{CR0} enables protected-mode semantics, but the far jump makes the processor reload \texttt{CS} from the new GDT. At \texttt{p\_mode\_main}, the assembler is told \texttt{[bits 32]}; the code loads data selectors, assigns \texttt{ESP = kernel\_stack\_top}, writes a proof character to VGA memory, and calls \texttt{kernel\_main}.
+
+\section{Linking is part of booting}
+The kernel linker script starts sections at \texttt{0x9000}. It defines \texttt{\_kernel\_start} and \texttt{\_kernel\_end}, then places \texttt{.text}, \texttt{.data}, and \texttt{.bss}. The binary produced by \texttt{objcopy -O binary} has no ELF headers; it is raw bytes intended to be copied exactly where the linker expected them. That is why a mismatch here normally produces a crash long before a useful error message.
+
+\checkpoint{Use \texttt{objdump -h build/kernel.elf} after a build. Locate the virtual memory address of \texttt{.text}; it should agree with the link base. Then use \texttt{stat -c\%s build/kernel.bin} and divide by 512 to check the fixed sector budget.}
+
+\chapter{Descriptor tables and interrupt frames in depth}
+\section{GDT selectors and privilege levels}
+A selector is not a raw address. It indexes a descriptor table and includes privilege bits. The project uses kernel code selector \texttt{0x08} and kernel data selector \texttt{0x10}; user code and data selectors are based on \texttt{0x18} and \texttt{0x20}, with the low two bits set to 3 for ring 3. The descriptor's access byte determines whether code can execute or data can be written. The descriptors are flat, so base zero plus a large limit covers the ordinary address range.
+
+The TSS descriptor is populated later by \texttt{init\_tss}. The CPU does not switch tasks through this TSS; the kernel switches tasks in software. It uses the TSS for one critical job: when an interrupt transfers from ring 3 to ring 0, the CPU needs a trusted kernel stack. \texttt{tss.esp0} is updated when a user process becomes current.
+
+\section{What the CPU puts on a stack}
+When an interrupt or exception occurs, the processor saves enough state to resume: at least \texttt{EIP}, \texttt{CS}, and \texttt{EFLAGS}; an exception with an error code adds one. A privilege transition also saves the old user \texttt{ESP} and \texttt{SS} after switching to the kernel stack. The assembly stubs save general registers and a data segment value around these CPU-provided fields. The resulting memory order is represented by \texttt{registers\_t}.
+
+This explains why changing that C structure without changing assembly is dangerous. A handler reading \texttt{regs->eax} is reading a fixed stack offset. If the two sides disagree, it may mistake a return address for an interrupt number. Always treat assembly and its matching C structure as one unit.
+
+\section{Exceptions, IRQs, and system calls use different policies}
+\texttt{isr\_handler} handles CPU exceptions. It prints a diagnosis; for a fault from user mode it terminates that process and chooses another. A kernel-mode fault enters an infinite loop because the kernel cannot safely continue after corrupted privileged state. \texttt{irq\_handler} dispatches hardware events and then acknowledges the PIC. \texttt{syscall\_handler} interprets a deliberate request from user code and returns a result in the saved \texttt{EAX} field.
+
+The distinction is a design tool. An exception means an instruction could not complete. An IRQ means an external device needs service. A syscall means code intentionally requested a defined kernel service. Combining them into one opaque ``interrupt'' idea makes error handling confusing.
+
+\section{Page faults as a worked example}
+Vector 14 is a page fault. The CPU writes the virtual address it tried to access into \texttt{CR2}; it also pushes an error code. \pathname{memory/vmm.c} tests the code's present, write, user, reserved, and instruction-fetch bits. A non-present read can indicate an unmapped page; a present write can mean a protection violation. The instruction pointer identifies the code that made the access, while \texttt{CR2} identifies the address it wanted.
+
+\exercise{Temporarily access an unmapped address from kernel code only after you have verified screen output. Record the fault address and EIP. Do not use this test with an address that changes disk data or mapped allocator metadata.}
+
+\chapter{Device drivers as state machines}
+\section{Port I/O is not memory I/O}
+The instructions \texttt{in} and \texttt{out} communicate with I/O ports, a separate x86 address space. Assembly helpers in \pathname{kernel/interrupts.asm} make these instructions callable from C: \texttt{outb}, \texttt{inb}, \texttt{outw}, \texttt{inw}, and \texttt{io\_wait}. A port number such as \texttt{0x60} does not point into normal RAM. The value of \texttt{volatile} in VGA code has a similar motivation: device interactions must happen in the requested order.
+
+\section{PIT timer calculation}
+The PIT base oscillator is 1,193,182 Hz. To request a frequency \(f\), \texttt{timer\_init} calculates divisor \(d = 1193182 / f\), writes a command byte to port \texttt{0x43}, then writes low and high divisor bytes to channel 0 at \texttt{0x40}. The timer IRQ increments a tick counter. \texttt{timer\_wait\_ms} converts milliseconds into a target tick count and waits until it is reached.
+
+This is approximate time. Integer division rounds the divisor, scheduling costs time, and the implementation does not calibrate against a real clock. It is sufficient to explain periodic interrupts and sleeping processes. Do not use it for precise timing claims.
+
+\section{Keyboard scan codes and lines of input}
+A PS/2 keyboard sends scan codes, not ASCII characters. The driver reads one code at a time from port \texttt{0x60}. It recognizes release codes, shift, extended prefixes, and a small keymap. Translation is a policy layer: the hardware describes keys; the OS decides what character or action they mean.
+
+If \texttt{current\_process} is blocked in a standard-input read, the keyboard handler appends characters to that process's \texttt{reading\_state.buffer}. On Enter it completes the read and marks the process ready. This exposes an important boundary: code requesting input does not spin in a loop; it changes process state and lets another process run. The driver later causes progress.
+
+The current implementation is intentionally narrow. It has no keyboard layout configuration, no queues for multiple readers, no modifiers beyond its small mapping, and no terminal discipline. These are improvements, not evidence that the basic design is wrong.
+
+\section{ATA PIO disk operations}
+The ATA driver uses programmed I/O (PIO): the CPU waits for device status, then transfers sector words itself. \texttt{ata\_read\_sector} selects an LBA sector through ports \texttt{0x1F2}--\texttt{0x1F6}, issues \texttt{ATA\_CMD\_READ\_PIO}, waits for DRQ, and reads 256 16-bit words from \texttt{ATA\_DATA}. A write mirrors the sequence and flushes the disk cache. Status flags distinguish busy, data request, device fault, and error.
+
+This is synchronous I/O. While waiting, the kernel does not provide a nonblocking disk completion mechanism. The simple filesystem can tolerate that, but a faster system would use interrupt-driven I/O, request queues, and recovery policies.
+
+\checkpoint{Find every place that uses \texttt{outb} or \texttt{inb}. For each port, write down whether it belongs to PIC, PIT, keyboard, or ATA. This turns apparently mysterious numbers into a hardware map.}
+
+\chapter{Memory management laboratory}
+\section{Read the PMM initialization from end to end}
+The PMM starts with all bitmap bits reserved. It reads E820 records placed by the bootloader and clears bits only for usable ranges. It then re-reserves areas the kernel depends on: low memory, the loaded kernel, VGA memory, and the bitmap location. This conservative order is safer than assuming all memory is free and trying to remember every exclusion later.
+
+The bitmap is placed at \texttt{BITMAP\_BASE}, \texttt{0x100000}. That choice itself requires care: this memory must be reserved before the allocator can hand it out. \texttt{alloc\_frame} scans bits linearly. It is simple but has a cost proportional to the number of frames examined. On a small QEMU configuration that is acceptable; on a large machine it would be expensive.
+
+\section{Page flags and protection}
+Each page table entry contains a page-aligned physical frame address plus flags. \texttt{PAGE\_PRESENT} says translation exists. \texttt{PAGE\_WRITABLE} allows writes. \texttt{PAGE\_USER} permits ring-3 access. An address without \texttt{PAGE\_USER} may still be mapped for kernel use but fault when user code touches it. That one bit is the beginning of isolation between applications and the kernel.
+
+\texttt{create\_uprocess} copies the kernel directory entries into a fresh user directory. It maps a user stack below \texttt{USER\_STACK\_TOP} and an initial user heap page at \texttt{USER\_HEAP\_START}. The loader maps program code at \texttt{USER\_CODE\_BASE}. This kernel's copied kernel mappings make interrupt handling possible while a user address space is active, but a mature design would carefully restrict which kernel pages are exposed and set permissions precisely.
+
+\section{Walk one translation manually}
+For virtual address \texttt{0x00401234}, the directory index is bits 31--22, the table index is bits 21--12, and the offset is \texttt{0x234}. In C, \texttt{map\_page} computes these using shifts and masks. The directory entry locates a page table; the selected table entry locates a physical frame. Add the offset to the frame base to get the physical byte. Use this exercise whenever page-table code looks abstract.
+
+\section{Heap metadata and fragmentation}
+The kernel heap begins with one free block. A block header lives immediately before its usable data and contains size, free flag, and a link. If \texttt{kmalloc(24)} chooses a much larger free block, \texttt{split\_block} creates a second header after 24 payload bytes. \texttt{kfree} obtains the header by subtracting \texttt{sizeof(heap\_header\_t)} from the user pointer. Adjacent free blocks merge only in the forward direction from the block being freed.
+
+Fragmentation occurs when free space is divided into pieces too small for a later request even if their total size is large. First-fit allocation is easy to explain but can amplify this effect. A useful experiment alternates differently sized allocations, frees every other one, and tries one large allocation. Never run such a test in an unbounded loop: this teaching heap has no protection against exhaustion.
+
+\exercise{Add a debug function that walks the heap list and prints each header's address, payload size, and free flag. Call it after a controlled series of allocations. Remove it before progressing to unrelated debugging, because verbose output in low-level code can hide timing problems.}
+
+\chapter{Virtual memory from zero: a slow, visual explanation}
+This is the chapter to reread until it feels ordinary. Virtual memory often seems difficult because one word, ``address,'' is used for several jobs. We will use separate names and move only one step at a time. Nothing in this chapter relies on magic. It is a lookup table built from very regular pieces.
+
+\section{The child-friendly picture: street names and houses}
+Imagine that every program writes letters using street names. A program may say, ``put this letter at 0x00400000.'' That is a \emph{virtual address}: a name inside the program's own map. RAM contains the actual houses, which have \emph{physical addresses}. The operating system owns a large map that tells the CPU which virtual street leads to which physical house.
+
+Two children can both use the street name ``0x00400000'' in their own drawings. They do not collide if their maps point to different physical houses. A child cannot visit the castle (the kernel) merely by writing its name if the map marks the road private. This is the purpose of virtual memory: convenient names, separation, and controlled access.
+
+The CPU performs the lookup automatically for every instruction fetch, read, and write after paging is enabled. The kernel does not translate every byte by hand. It builds the map once, tells the CPU where the map begins, and the CPU uses it at speed.
+
+\section{Three labels for one byte}
+Suppose a user program executes this C statement:
+\begin{verbatim}
+buffer[0] = 'A';
+\end{verbatim}
+The compiler produces an instruction containing or computing a virtual address. It may be \texttt{0x00A00000}, the beginning of the user heap in this project. The CPU consults the current process's page tables and might find that it corresponds to physical address \texttt{0x00345000}. It stores the byte at that physical RAM location.
+
+Write the relationship like this:
+\begin{verbatim}
+program says:          virtual  0x00A00000
+page tables translate:           -> physical 0x00345000
+RAM receives:                    byte 'A' at 0x00345000
+\end{verbatim}
+
+The virtual address is meaningful only together with a page directory. If the scheduler switches to another process and loads another directory into \texttt{CR3}, the same virtual number can lead somewhere else. This is why a pointer saved from one process cannot automatically be trusted as a pointer in another process.
+
+\section{Why pages are 4096 bytes}
+The x86 paging mode used here divides memory into fixed-size pieces called pages. One page is 4096 bytes, also written 4 KiB or \texttt{0x1000}. Instead of mapping every individual byte, the kernel maps a whole page at once. The first byte in a page has offset 0; the last has offset 4095 (\texttt{0xFFF}).
+
+Think of an apartment building with exactly 4096 rooms. The page number tells you which building; the offset tells you which room in that building. If the virtual address is \texttt{0x00401234}, then the last three hexadecimal digits, \texttt{234}, are the offset. The page begins at \texttt{0x00401000}. The same offset \texttt{0x234} is used after translation, so a mapping that chooses physical page \texttt{0x00123000} reaches physical byte \texttt{0x00123234}.
+
+\section{One big address split into three pieces}
+An address in 32-bit paging is 32 bits wide. The low 12 bits are the page offset because \(2^{12} = 4096\). The remaining 20 bits choose the mapping. x86 divides those 20 bits into two groups of 10:
+\begin{center}
+\begin{tabular}{|p{0.31\linewidth}|p{0.31\linewidth}|p{0.18\linewidth}|}
+\hline
+\centering Directory index\\10 bits & \centering Table index\\10 bits & \centering Offset\\12 bits\tabularnewline
+\hline
+bits 31--22 & bits 21--12 & bits 11--0\\
+\hline
+\end{tabular}
+\end{center}
+
+A page directory has 1024 entries because \(2^{10}=1024\). Each page table also has 1024 entries. One table therefore describes \(1024 * 4096\) bytes, or 4 MiB. One directory can choose 1024 tables, describing 4 GiB in total. The hierarchy prevents the kernel from allocating a giant flat mapping array when most of the address space is unused.
+
+The source declares these exact shapes:
+\begin{verbatim}
+typedef uint32_t page_directory_t[1024];
+typedef uint32_t page_table_t[1024];
+\end{verbatim}
+Each entry is four bytes, so a complete directory or table is 4096 bytes: exactly one physical frame. This pleasing fit is not an accident. It is why \texttt{alloc\_frame()} is a natural way to allocate either one.
+
+\section{Do a complete translation with the project's formulas}
+We will translate virtual address \texttt{0x00401234}. Use the formulas in \pathname{memory/vmm.c}:
+\begin{verbatim}
+directory_index = virtual_address >> 22
+table_index     = (virtual_address >> 12) & 0x3FF
+offset          = virtual_address & 0xFFF
+\end{verbatim}
+For this address, the directory index is 1, because \texttt{0x00400000} is 4 MiB and each directory entry covers 4 MiB. The table index is 1, because the address is one 4 KiB page past \texttt{0x00400000}. The offset is \texttt{0x234}.
+
+Now imagine directory entry 1 contains \texttt{0x001AB007}. The low bits are flags; masking with \texttt{0xFFFFF000} leaves table physical address \texttt{0x001AB000}. Entry 1 in that table might contain \texttt{0x00345007}. Masking gives physical page \texttt{0x00345000}. Finally add the untouched offset: physical byte \texttt{0x00345234}.
+
+The lookup is therefore not ``search through all memory.'' It is two indexed array reads and one addition. The CPU has hardware designed to perform this quickly.
+
+\section{What a page-table entry stores}
+An entry is a 32-bit number. Its high bits hold a page-aligned physical address because every frame begins at a multiple of \texttt{0x1000}. Its low bits hold rules. This project defines three rules:
+\begin{longtable}{p{0.20\linewidth}p{0.16\linewidth}p{0.53\linewidth}}
+\textbf{Name} & \textbf{Bit} & \textbf{Meaning}\\ \hline
+\texttt{PAGE\_PRESENT} & 0 & The CPU may use this entry. If clear, an access causes a page fault.\\
+\texttt{PAGE\_WRITABLE} & 1 & Writes are allowed. If clear, a write is a protection fault.\\
+\texttt{PAGE\_USER} & 2 & Ring-3 code may access this mapping. If clear, it is kernel-only.\\
+\end{longtable}
+
+For instance, \texttt{0x00345007} means physical page \texttt{0x00345000} plus flags 1, 2, and 4: present, writable, and user-accessible. The code combines these with bitwise OR:
+\begin{verbatim}
+entry = physical_address | PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER;
+\end{verbatim}
+The physical address must already be page-aligned; otherwise its low address bits would collide with flag bits. \texttt{alloc\_frame()} returns aligned addresses for this reason.
+
+\section{Read \texttt{init\_vmm} like a recipe}
+Open \pathname{memory/vmm.c}. \texttt{init\_vmm()} first asks the PMM for one frame for \texttt{kernel\_directory} and one for \texttt{tbl\_ptr}. It clears both frames with \texttt{memset}. A cleared table means every mapping starts absent; this is a safe empty map.
+
+Next, a loop fills all 1024 entries of the first table:
+\begin{verbatim}
+(*tbl_ptr)[i] = (i * 0x1000) | PAGE_PRESENT | PAGE_WRITABLE;
+\end{verbatim}
+For \texttt{i = 0}, virtual page 0 maps physical page 0. For \texttt{i = 1}, virtual \texttt{0x1000} maps physical \texttt{0x1000}. For the final index, virtual \texttt{0x003FF000} maps the same physical page. This is called an \emph{identity map}. It covers the first 4 MiB.
+
+Then directory entry 0 is set to point at that first table. Entry zero is chosen because virtual addresses from \texttt{0x00000000} through \texttt{0x003FFFFF} have directory index zero. Finally, the code sets \texttt{current\_directory}, loads its address into \texttt{CR3}, and sets the PG bit in \texttt{CR0}. From that instruction onward, the CPU translates addresses. The currently executing kernel is safe because it was loaded below 4 MiB and its old addresses still refer to the same RAM through the identity map.
+
+\section{Read \texttt{map\_page} one line at a time}
+\texttt{map\_page(directory, virtual, physical, flags)} is the central operation. It does five jobs.
+\begin{enumerate}
+\item It calculates directory and table indexes from the virtual address.
+\item It looks in the directory for the selected table.
+\item If no present table exists, it allocates and clears one with \texttt{create\_page\_table}, then records it in the directory.
+\item It writes the physical frame plus flags into the selected table entry.
+\item If this directory is currently active, it calls \texttt{invlpg} for that virtual page.
+\end{enumerate}
+
+The third step is easy to miss. Mapping address \texttt{0xC0000000}, for example, has directory index 768. The first identity table is directory index 0, so it cannot describe that address. \texttt{map\_page} creates a new table for directory entry 768 automatically. This is why the heap initialization can request a mapping at \texttt{HEAP\_START} without first manually constructing a high-address table.
+
+\section{Why the TLB exists, and why it must be invalidated}
+Page walking would require two memory reads before every ordinary memory access. The Translation Lookaside Buffer (TLB) is a small CPU cache remembering recent virtual-page to physical-page answers. It makes virtual memory fast in normal use.
+
+The cache introduces one rule: after changing a page table, the old answer may still be cached. \texttt{flush\_tlb\_page} in \pathname{memory/vmm.asm} executes \texttt{invlpg [eax]}, which invalidates the cache entry for one virtual page. \texttt{map\_page} uses it only if it modified \texttt{current\_directory}; an inactive future process has no active TLB entry on this CPU yet. \texttt{flush\_tlb} reloads CR3 to invalidate the entire cache, which is simpler but more expensive.
+
+\section{The kernel heap is a useful real mapping}
+\texttt{init\_heap} requests a physical frame, maps it at virtual \texttt{0xC0000000}, and places its first allocation header at that virtual address. Notice the two different values: the PMM chooses the physical frame, while the VMM gives it a stable high virtual name. The heap allocator never needs to know which RAM frame backs its blocks. When the heap grows, \texttt{expand\_heap} repeats the pattern for \texttt{heap\_end}, then increments \texttt{heap\_end} by one page.
+
+This is an important division of responsibility. The heap allocator manages variable-size pieces inside mapped virtual pages. The VMM manages whole-page mappings. The PMM manages whole physical frames. If you mix the layers, bugs become very hard to reason about.
+
+\section{User address spaces in this exact system}
+When \texttt{create\_uprocess} runs, it allocates a fresh page directory and clears it. It copies every entry from \texttt{kernel\_directory}. Therefore the user directory begins with the kernel's existing mappings. It then maps one user stack page at \texttt{USER\_STACK\_TOP - 4096} and one user heap page at \texttt{USER\_HEAP\_START}; both have present, writable, and user flags.
+
+The loader later maps program pages at \texttt{USER\_CODE\_BASE}, \texttt{0x00400000}, also with user and writable flags. The program's link script starts its sections at that same address. This three-part agreement is essential:
+\begin{verbatim}
+user/user.ld             expects code at 0x00400000
+include/kernel/mappings.h names USER_CODE_BASE as 0x00400000
+tasks/loader.c           maps file pages at USER_CODE_BASE
+\end{verbatim}
+
+The code defines \texttt{USER\_VGA}, but the current process setup does not map it. Do not assume that a named constant proves a feature exists. Search for calls to \texttt{map\_page} to discover what the final implementation actually maps.
+
+\section{What happens during a page fault}
+If code touches a virtual page without a usable entry, the CPU stops the attempted instruction and enters IDT vector 14. It saves state, puts the troublesome virtual address in \texttt{CR2}, and supplies error bits. \texttt{page\_fault\_handler} prints the address and decodes the reason. It does not allocate missing pages on demand; it is a diagnostic handler. After a user-originated fault, \texttt{isr\_handler} terminates the user process. After a kernel fault, it loops forever because continuing could damage the system.
+
+The phrase ``page fault'' does not always mean a software bug. Modern operating systems intentionally leave pages absent and use faults to load files or allocate memory lazily. In this project, it normally means that a mapping or permission rule is wrong, so it is a very useful error report.
+
+\section{Common beginner confusions, answered carefully}
+\textbf{``Is a page a physical thing or a virtual thing?''} Both names are used. A \emph{virtual page} is a 4 KiB range in an address space; a \emph{physical frame} is a 4 KiB range in RAM. This book uses ``frame'' for physical and ``page'' for virtual whenever possible.
+
+\textbf{``Does creating a process copy all program bytes?''} No. \texttt{create\_uprocess} creates its bookkeeping, page directory, initial stack, and heap. \texttt{load\_program} reads a specific file and maps code frames. A separate process can therefore exist before a file is loaded, depending on the design.
+
+\textbf{``Why does the kernel use virtual addresses if it has all privileges?''} Paging gives the kernel flexible placement, controlled mappings, and the same useful page-granularity tools. The current kernel starts with a simple identity map for clarity, then maps its heap high at \texttt{0xC0000000}.
+
+\textbf{``Why can the code cast a page-table address to a pointer?''} Early kernel page tables are allocated from identity-mapped physical frames. While that identity mapping exists, the physical frame number can also be used as a kernel virtual address. A higher-half kernel would need a deliberate conversion or mapping instead.
+
+\textbf{``Does \texttt{get\_physical\_address} return the complete byte address?''} In the present source it masks and returns the page frame base. It does not add the original virtual offset. That is adequate for its current use only if callers expect a page base. A general translation helper should add \texttt{virtual\_address \& 0xFFF}.
+
+\section{A safe virtual-memory practice sequence}
+Do these steps in order, rebuilding after each one.
+\begin{enumerate}
+\item Add a message immediately before and immediately after \texttt{init\_vmm}. If the second never appears, do not proceed to heap work.
+\item Print the addresses returned by the first two \texttt{alloc\_frame} calls used for directory and table. Confirm both end in three hexadecimal zeros.
+\item In a temporary function, call \texttt{map\_page(kernel\_directory, 0xC0100000, frame, PAGE\_PRESENT | PAGE\_WRITABLE)} and write a recognizable value through \texttt{(uint32\_t *)0xC0100000}. Do not choose an address used by existing mappings.
+\item Read the same value through that virtual address. This confirms that allocation, mapping, TLB invalidation, and ordinary access all agree.
+\item Call \texttt{unmap\_page} for the test address and then deliberately read it only if you are prepared for the diagnostic page-fault screen.
+\item Restore the experiment before working on processes. Keep the written notes; the code should return to a clean baseline.
+\end{enumerate}
+
+\checkpoint{Explain this sentence in your own words: ``\texttt{CR3} chooses a map; the directory chooses a table; the table chooses a frame; the offset chooses a byte.'' If any noun is unclear, repeat the matching section before moving on.}
+
+\chapter{Process, scheduler, and privilege-transition laboratory}
+\section{Lifecycle of a kernel process}
+\texttt{init\_procman} creates PID 1 for the running kernel context. \texttt{create\_process} allocates a \texttt{process\_t}, assigns a PID and state, allocates a kernel stack, sets an instruction pointer, then chooses \texttt{create\_kprocess} or \texttt{create\_uprocess}. New processes enter the linked list as ready. The scheduler never creates CPU state out of nowhere; it only selects a record that already contains a saved or initial register image.
+
+For a new kernel process, \texttt{EIP} is the task function and \texttt{ESP} starts at the top of that process's kernel stack. Code/data selectors are ring 0. The initial \texttt{EFLAGS} value \texttt{0x202} sets the always-reserved bit and enables interrupts when returned to. The process shares \texttt{kernel\_directory}.
+
+\section{Lifecycle of a user process}
+For a user process, code starts at \texttt{USER\_CODE\_BASE}; the loader makes it true by mapping file data at that virtual address. \texttt{CS}, \texttt{DS}, and \texttt{SS} receive ring-3 selectors. The process gets its own page directory and user stack. When the context layer chooses it, it sets \texttt{return\_to\_user}, updates \texttt{tss.esp0}, loads its CR3, and restores the saved interrupt frame so that the eventual \texttt{iret} crosses down to ring 3.
+
+The TSS's \texttt{esp0} must point at the selected user's kernel stack. Otherwise the CPU would have nowhere trusted to save a user-to-kernel interrupt frame. This is one of the most common conceptual gaps in first operating-system projects: a user stack is untrusted and cannot be reused as the kernel's interrupt stack.
+
+\section{Scheduling states tell the story}
+The scheduler considers ready processes. A running process becomes ready during a switch unless some other code already marked it blocked, sleeping, or terminated. \texttt{SYSCALL\_SLEEP} records a future tick and makes the caller sleeping. \texttt{SYSCALL\_READ} on standard input makes it blocked. The timer and keyboard handlers later move them back to ready. \texttt{SYSCALL\_EXIT} marks a child terminated and wakes a parent that is waiting for that PID.
+
+This is a state machine. Draw arrows rather than memorizing cases:
+\begin{verbatim}
+READY -> RUNNING -> READY       (time slice / yield)
+RUNNING -> SLEEPING -> READY    (sleep / timer deadline)
+RUNNING -> BLOCKED -> READY     (stdin or child wait / event)
+RUNNING -> TERMINATED           (exit or user fault)
+\end{verbatim}
+
+\section{What context switching does not solve}
+The scheduler is round robin over one linked list. It has no priority, idle task, locks, SMP support, signal handling, or robust resource cleanup. \texttt{destroy\_process} also demonstrates why process teardown is harder than creation: every mapped page, file record, and parent relationship needs a clear owner. Treat this code as a working learning base; inspect ownership before adding a new resource to \texttt{process\_t}.
+
+\checkpoint{Set a breakpoint on \texttt{context\_switch} in GDB and record old PID, new PID, old state, new state, and CR3 before/after. Repeating this for a timer switch and a syscall-driven sleep makes the state machine concrete.}
+
+\chapter{Filesystem and userspace laboratory}
+\section{Calculate the on-disk structures}
+The filesystem starts at disk sector 70, leaving the bootloader and fixed kernel load area earlier in the image. A filesystem block is one 512-byte ATA sector. The superblock occupies filesystem block 0; the bitmap is block 1; inode storage begins at block 2. There are 128 inodes. Because each inode has a size, type, and ten 32-bit block numbers, calculate \texttt{sizeof(fs\_inode\_t)} with the host/compiler layout rather than guessing. The formatter computes how many 512-byte blocks the inode table requires, then names the first data block.
+
+The root inode number is zero. A free inode has type zero. Directory entries contain an inode number and a fixed 32-character name. Inode zero cannot be used as an ordinary empty-entry marker in a root directory, so the implementation's conventions deserve close reading when modifying directory code. Fixed-size entries simplify scanning but impose filename and capacity limits.
+
+\section{Formatting creates invariants}
+\texttt{fs\_format} writes a superblock, marks metadata blocks used in the bitmap, reserves a root data block, clears inode-table blocks, writes the root inode as a directory, and clears its first directory block. After formatting, every function assumes these invariants. For example, allocation expects metadata bits to be set; path resolution expects root inode to exist; a directory reader expects blocks named by its inode to contain entry records.
+
+When a filesystem function fails halfway through several sector writes, it can leave metadata inconsistent. This teaching implementation has limited failure recovery. A production filesystem would use transactions, a journal, copy-on-write, or fsck-like repair. The small code is still useful because it shows why those advanced ideas are needed.
+
+\section{Follow an open/read/write request}
+\texttt{fs\_open} resolves an absolute path, finds an unused record in the global \texttt{open\_files} array, stores its inode and offset, then returns an external descriptor offset by \texttt{FS\_FD\_OFFSET}. \texttt{fs\_read} converts that descriptor back to an array index, asks the filesystem core to copy bytes beginning at the stored offset, and increments the offset by the result. \texttt{fs\_write} follows the same pattern.
+
+This gives a concrete meaning to a file descriptor: it is not the file itself. It identifies a live record containing the current position. The current table is global, so two processes can interfere with descriptor allocation and offsets. Making it per-process is an excellent later extension.
+
+\section{From a host file to a running program}
+The Makefile compiles a user C file with freestanding flags, links it at \texttt{0x00400000}, converts the ELF into a flat binary, and copies that binary into \pathname{rootfs/bin/}. \texttt{mkfs} traverses \pathname{rootfs} using the host's \texttt{opendir}, \texttt{readdir}, and \texttt{fread} APIs and writes matching entries into the raw image. At boot, \texttt{load\_program} reverses the final step: open path, read bytes, allocate frames, copy chunks, map them at the link address, and create a user process.
+
+The loader uses a variable-length stack buffer sized to the file. That is simple but potentially dangerous for a large binary because kernel stack space is limited. A stronger loader would stream one page at a time or allocate a controlled buffer. It also maps code writable and does not parse executable metadata; record those facts before treating it as a general program loader.
+
+\section{Shell commands are an API exercise}
+The shell expects exactly two words for every command in its present form. \texttt{ls}, \texttt{mkdir}, \texttt{touch}, \texttt{rm}, and \texttt{run} call \texttt{fs\_ops}. \texttt{cat} uses \texttt{open}, a read loop, and \texttt{write}. \texttt{write} dynamically grows a user-space buffer, receives a line from standard input, writes it to an open descriptor, and closes it. Each command is small because its work is divided cleanly between parser, libc wrapper, syscall dispatcher, manager, and filesystem core.
+
+\exercise{Implement a \texttt{pwd} command only after deciding what data is necessary. The present filesystem has no parent inode or process working directory, so a true \texttt{pwd} requires a design change. A useful first version can explicitly report that paths are absolute.}
+
+\chapter{Build, test, and debug like a kernel developer}
+\section{Make clean experiments}
+Use a short branch or copy for each experiment. Build from \pathname{lytlnybl/} with \texttt{make clean} followed by \texttt{make run} when you need to rule out stale objects. The output image is generated, so do not edit it by hand unless your task is specifically to inspect sectors. Keep a one-line change log: changed file, observation, and next hypothesis. Kernel debugging becomes much faster when you know exactly which assumption a test was meant to check.
+
+\section{Use staged evidence}
+The bootloader has BIOS text, the protected-mode entry writes a direct VGA character, and \texttt{kernel\_main} prints through the driver. These are three independent checkpoints. Add similarly small markers around risky initialization. If a marker disappears after a change, the last visible marker is more useful than a large speculative patch.
+
+For disk and filesystem work, inspect both levels: use shell commands for functional evidence and host tools such as \texttt{hexdump -C build/kernel.img} for raw evidence. For paging work, print CR2 and EIP on a fault. For scheduler work, print process IDs sparingly; excessive printing inside interrupt paths changes timing and can hide the bug.
+
+\section{GDB and QEMU}
+The Makefile contains a commented \texttt{-s -S}. With it enabled, QEMU opens a GDB server on port 1234 and stops before execution. In another terminal, start \texttt{i686-elf-gdb build/kernel.elf}, then use \texttt{target remote :1234}. Break at symbols such as \texttt{kernel\_main}, \texttt{idt\_init}, or \texttt{context\_switch}. Use \texttt{info registers}, \texttt{x/16i \$eip}, and \texttt{x/32wx \$esp} to inspect state.
+
+Be aware that the bootloader is a raw binary while the kernel ELF retains symbols. GDB can understand the latter naturally. To debug early boot, you need to set the architecture and load symbols at the correct address, or use a disassembly listing generated by NASM. Start with kernel C debugging; it yields more information with less setup.
+
+\section{A review checklist for every extension}
+\begin{enumerate}
+\item Name the public interface: header, function signature, constants, and return errors.
+\item Identify ownership: who allocates each resource and who frees it on success and failure.
+\item Identify contexts: may the code run in interrupt context, user context, or only normal kernel context?
+\item Identify address spaces: is each pointer physical, kernel virtual, or user virtual?
+\item Add one observable success case and one observable failure case.
+\item Rebuild from clean state and repeat the existing shell smoke test.
+\end{enumerate}
+
+\section{Capstone projects}
+Choose one project and write a two-page design before coding. Good choices are a serial logger, a per-process file descriptor table, append mode for files, a safer command parser, a page-table dump command, or a simple ELF loader. Each project teaches more when it respects existing interfaces and includes a test plan than when it adds a large amount of untested code.

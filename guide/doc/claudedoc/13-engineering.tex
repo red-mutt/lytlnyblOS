@@ -1,0 +1,731 @@
+\part{Engineering: building, debugging, improving}
+
+\chapter{The build system}
+
+\begin{goals}
+  \item Read the project Makefile and understand every rule
+  \item Understand why there are two compilers
+  \item Know the weaknesses of this build and how to fix them
+\end{goals}
+
+\section{Two compilers, one project}
+
+\filetag{lytlnybl/Makefile}
+\begin{lstlisting}[style=mk]
+CC = i686-elf-gcc          # for code that runs on lytlnyblOS
+HOST_CC = gcc              # for mkfs, which runs on your machine
+LD = ld
+NASM = nasm
+OBJCOPY = objcopy
+AR = i686-elf-ar
+
+CFLAGS = -g -m32 -Iinclude -ffreestanding
+USER_CFLAGS = $(CFLAGS) -fno-pie -fno-pic
+\end{lstlisting}
+
+\cod{-fno-pie -fno-pic} for user programs is worth explaining. Modern compilers default to
+generating \emph{position-independent code}, which can be loaded anywhere --- useful for address
+space randomisation on a real OS. But our loader maps every program at exactly \hexa{400000} and
+there is no dynamic relocation, so position independence is pure overhead and can produce
+constructs the loader would have to handle. Turning it off gives plain absolute code.
+
+\section{Finding sources automatically}
+
+\begin{lstlisting}[style=mk]
+KERNEL_C_FILES = $(shell find kernel memory filesystem tasks -name '*.c')
+KERNEL_ASM_FILES = $(shell find kernel memory tasks -name '*.asm')
+
+KERNEL_C_OBJECTS = $(KERNEL_C_FILES:%.c=$(BUILD_DIR)/%.o)
+KERNEL_ASM_OBJECTS = $(KERNEL_ASM_FILES:%.asm=$(BUILD_DIR)/%.asm.o)
+\end{lstlisting}
+
+\cod{\$(shell find ...)} runs a command at parse time and captures its output, so adding a new
+\cod{.c} file to \filepath{kernel/} requires no Makefile change. The substitution
+\cod{\$(FILES:\%.c=\$(BUILD\_DIR)/\%.o)} turns \cod{kernel/interrupts.c} into
+\cod{build/kernel/interrupts.o}, mirroring the source tree inside \filepath{build/}.
+
+\section{Pattern rules}
+
+\begin{lstlisting}[style=mk]
+$(BUILD_DIR)/%.o: %.c
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/%.asm.o: %.asm
+	mkdir -p $(dir $@)
+	$(NASM) -f elf32 -g -F dwarf $< -o $@
+\end{lstlisting}
+
+\begin{center}
+\begin{tabularx}{0.9\textwidth}{@{}l X@{}}
+\toprule
+\textbf{Variable} & \textbf{Means} \\
+\midrule
+\cod{\$@} & The target being built \\
+\cod{\$<} & The first prerequisite \\
+\cod{\$\^{}} & All prerequisites \\
+\cod{\$(dir \$@)} & The directory part of the target \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\cod{-f elf32} tells NASM to produce a relocatable object file rather than a flat binary, so the
+linker can combine it with the C objects. \cod{-g -F dwarf} adds debug information in the format GDB
+expects --- which is what makes stepping through assembly in the debugger possible.
+
+\section{The critical link order}
+
+\begin{lstlisting}[style=mk]
+$(KERNEL_ELF): $(KERNEL_C_OBJECTS) $(KERNEL_ASM_OBJECTS)
+	$(LD) -m elf_i386 -T $(KERNEL_LINKER) \
+		$(KERNEL_ENTRY_OBJECT) \
+		$(KERNEL_C_OBJECTS) \
+		$(filter-out $(KERNEL_ENTRY_OBJECT),$(KERNEL_ASM_OBJECTS)) \
+		-o $@
+\end{lstlisting}
+
+\begin{concept}{Why \cod{kernel\_intro.asm.o} must be first}
+The linker lays out \cod{.text} in the order the object files appear. The linker script puts
+\cod{.text} at \hexa{9000}, and the bootloader jumps to \hexa{9000}.
+
+Therefore \hi{whatever code is first in the link line ends up at the entry point}.
+\cod{\$(KERNEL\_ENTRY\_OBJECT)} is listed explicitly first, and \cod{filter-out} removes it from the
+rest so it is not linked twice.
+
+If that ordering broke, the bootloader would jump into the middle of some random function, in 16-bit
+mode, with no diagnostic whatsoever. Note the linker already warns about a related issue:
+\begin{lstlisting}[style=txt]
+ld: warning: cannot find entry symbol start; defaulting to 00009000
+\end{lstlisting}
+because \cod{start:} in the assembly file is not declared \cod{global}. It works only because of the
+link order. Adding \cod{global start} would make the intent explicit and the build robust.
+\end{concept}
+
+\section{From ELF to a disk image}
+
+\begin{lstlisting}[style=mk]
+$(KERNEL_BIN): $(KERNEL_ELF)
+	$(OBJCOPY) -O binary $< $@
+\end{lstlisting}
+
+An ELF file has headers, a symbol table, section metadata and debug information. The bootloader
+understands none of that --- it copies raw sectors to \hexa{9000} and jumps. \cod{objcopy -O binary}
+strips everything and leaves just the bytes, in the order the linker placed them.
+
+Both files are kept: \cod{kernel.bin} goes into the image, and \cod{kernel.elf} stays behind for GDB,
+which needs the symbols.
+
+\section{What is missing from this build}
+
+\begin{danger}{No header dependencies}
+This is the most practically annoying weakness. The rule says \cod{\$(BUILD\_DIR)/\%.o: \%.c} ---
+the object depends on the \cod{.c} file and nothing else.
+
+So editing \filepath{include/memory/vmm.h} rebuilds \textbf{nothing}. You change a struct, run
+\cod{make}, it says ``nothing to be done'', and you spend the next hour debugging a binary built
+from two incompatible versions of the same header.
+
+The fix is two lines:
+\begin{lstlisting}[style=mk]
+CFLAGS += -MMD -MP
+-include $(shell find $(BUILD_DIR) -name '*.d' 2>/dev/null)
+\end{lstlisting}
+\cod{-MMD} makes GCC emit a \cod{.d} file listing every header the source included, and \cod{-include}
+pulls those in as extra rules. After that, touching a header rebuilds exactly what depends on it.
+\end{danger}
+
+\begin{warn}{No warnings enabled}
+\cod{CFLAGS} has no \cod{-Wall -Wextra}. Turning them on for this project produces only a handful of
+findings --- a few unused variables and one intentional switch fall-through --- so the cost of
+adopting them is almost zero and the future benefit is large.
+
+Be aware of the limits, though: \cod{-Wall -Wextra} does \emph{not} catch the uninitialised
+\cod{word\_count} in the shell, because taking its address defeats the analysis. Warnings are a
+floor, not a ceiling.
+\end{warn}
+
+\begin{warn}{Host linker, and generated binaries in git}
+\cod{LD = ld} uses the host linker with \cod{-m elf\_i386}. It works on an x86-64 Linux host but
+would fail on, say, an ARM machine where the host \cod{ld} cannot target i386. \cod{i686-elf-ld}
+would be correct.
+
+Separately, \filepath{rootfs/bin/shell} and \filepath{rootfs/bin/user\_test} are tracked in
+git even though they are build outputs. They show as modified after every build, which clutters every
+diff. They belong in \cod{.gitignore}.
+\end{warn}
+
+% ============================================================
+\chapter{Debugging a kernel}
+
+\begin{goals}
+  \item Know the four techniques available and when each applies
+  \item Be able to use GDB against a running kernel
+  \item Be able to read a QEMU interrupt trace
+\end{goals}
+
+\section{Four techniques}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Technique} & \textbf{Cost} & \textbf{Best for} \\
+\midrule
+Print to screen & trivial & ``Does it reach this line?'' ``What is this value?'' \\
+GDB via QEMU & medium & Inspecting state at a precise point; stepping \\
+QEMU tracing & low & Faults, resets, interrupt storms --- things that happen too fast to see \\
+Reading the code & free & Everything else, and you will do more of this than you expect \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{Printing}
+
+Crude and extremely effective. The kernel does it itself before any driver exists:
+
+\begin{lstlisting}[style=c]
+volatile char* vga = (volatile char*)0xB8000;
+vga[0] = 'C'; vga[1] = 0x02;
+\end{lstlisting}
+
+Two bytes and you know execution reached that line. Using different screen positions for different
+checkpoints gives a crude progress display that survives even a completely broken driver.
+
+\begin{warn}{But printing can be the thing that is broken}
+Chapter 20 showed the failure mode: if \cod{terminal} is corrupt, every print attempt faults. When
+the system dies \emph{during} your debug output, printing tells you nothing. That is exactly when
+the next two techniques earn their keep.
+\end{warn}
+
+\section{GDB against QEMU}
+
+QEMU can expose a GDB server and start paused:
+
+\filetag{lytlnybl/Makefile}
+\begin{lstlisting}[style=mk]
+run: $(KERNEL_IMG)
+	qemu-system-i386 -drive format=raw,file=$(KERNEL_IMG) #-s -S
+\end{lstlisting}
+
+Uncomment \cod{-s -S}: \cod{-s} opens a GDB server on port 1234, \cod{-S} freezes the CPU before the
+first instruction. Then, in another terminal:
+
+\begin{lstlisting}[style=sh]
+gdb build/kernel.elf
+(gdb) target remote localhost:1234
+(gdb) break kernel_main
+(gdb) continue
+\end{lstlisting}
+
+The project ships a \filepath{.gdbinit} to automate the connection.
+
+\subsection{Commands worth knowing}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{Command} & \textbf{Does} \\
+\midrule
+\cod{info registers} & Show every register, including \reg{CR0}, \reg{CR2}, \reg{CR3} \\
+\cod{x/16xb 0xB8000} & Dump 16 bytes in hex from video memory \\
+\cod{x/10i \$eip} & Disassemble the next 10 instructions \\
+\cod{p/x terminal} & Print a struct in hex \\
+\cod{watch terminal.width} & \textbf{Break when a variable changes} \\
+\cod{bt} & Backtrace --- the chain of calls \\
+\cod{stepi} / \cod{nexti} & Step one machine instruction \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\begin{concept}{\cod{watch} is the one that finds memory corruption}
+When a variable is being overwritten by something and you have no idea what, a hardware watchpoint
+is the tool. \cod{watch terminal.width} tells the processor to trap on any write to that address,
+and GDB stops you at the exact instruction responsible --- which may be in a completely unrelated
+file.
+
+For the bug in the next chapter, \cod{watch terminal.width} would have pointed straight at a
+\cod{memcpy} inside the program loader.
+\end{concept}
+
+\section{QEMU tracing}
+
+For faults that happen faster than you can observe, QEMU can log every interrupt and every CPU
+reset:
+
+\begin{lstlisting}[style=sh]
+qemu-system-i386 -drive format=raw,file=build/kernel.img \
+    -display none -no-reboot \
+    -d int,cpu_reset -D trace.log
+\end{lstlisting}
+
+\begin{center}
+\begin{tabularx}{0.95\textwidth}{@{}l X@{}}
+\toprule
+\textbf{Option} & \textbf{Effect} \\
+\midrule
+\cod{-d int} & Log every interrupt and exception with full register state \\
+\cod{-d cpu\_reset} & Log every processor reset \\
+\cod{-no-reboot} & \textbf{Stop instead of rebooting} on triple fault \\
+\cod{-D file} & Write the log to a file \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\cod{-no-reboot} is the important one. Without it, a triple fault silently restarts the machine and
+you see a boot loop with no information. With it, QEMU prints \cod{Triple fault} and exits, leaving
+the log ending exactly at the failure.
+
+A log line looks like this:
+
+\begin{lstlisting}[style=txt]
+   278: v=0e e=0002 i=0 cpl=0 IP=0008:0000ad98 pc=0000ad98 SP=0010:c0000000 CR2=bffffffc
+\end{lstlisting}
+
+\begin{center}
+\begin{tabularx}{0.95\textwidth}{@{}l X@{}}
+\toprule
+\textbf{Field} & \textbf{Meaning} \\
+\midrule
+\cod{278} & Sequence number --- how many interrupts have occurred \\
+\cod{v=0e} & Vector \hexa{0E} = 14 = page fault \\
+\cod{e=0002} & Error code: bit 1 set = it was a write, bit 0 clear = page not present \\
+\cod{cpl=0} & Current privilege level: the kernel \\
+\cod{IP=0008:0000ad98} & Where it faulted \\
+\cod{SP=0010:c0000000} & Stack pointer at the time \\
+\cod{CR2=bffffffc} & The address that was accessed \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{Reading the screen without a screen}
+
+One more trick, useful for automated testing. QEMU's monitor can capture the framebuffer:
+
+\begin{lstlisting}[style=sh]
+qemu-system-i386 -drive format=raw,file=build/kernel.img \
+    -display none -monitor unix:/tmp/mon.sock,server,nowait
+\end{lstlisting}
+
+Connect to that socket and issue \cod{screendump /tmp/shot.ppm}. You get a 720$\times$400 image of
+the text screen.
+
+\begin{warn}{\cod{pmemsave} will not read video memory}
+It is tempting to dump \hexa{B8000} directly with the monitor's \cod{pmemsave} command. It returns
+zeros: that address is a device region, not RAM, and the command only reads RAM.
+
+\cod{screendump} works because it asks the display device for its rendered output. Since the VGA
+font is a known 8$\times$16 bitmap (extractable from the \cod{vgabios.bin} that ships with QEMU),
+each 9$\times$16 cell of the image can be matched back to a character --- giving you the text of the
+screen as a string, from a script, with no display attached. That is how the boot output quoted
+throughout this course was captured.
+\end{warn}
+
+% ============================================================
+\chapter{Case study: a reboot loop}
+
+\begin{goals}
+  \item Follow a complete diagnosis from symptom to root cause
+  \item See how to work backwards along a chain of causes
+  \item Learn the method, not just this answer
+\end{goals}
+
+This chapter walks through a real fault in this project, diagnosed on a real machine. The
+intermediate observations are exactly those produced by the tools, not reconstructed afterwards.
+
+\section{The symptom}
+
+A clean rebuild of the project boots, prints its self-test output, reaches the line
+\cod{Running shell:} --- and then the screen goes blank and the BIOS banner appears again. And
+again. A reboot loop, with no error message.
+
+Curiously, the \emph{prebuilt} image already in the repository boots fine and reaches a working
+shell prompt. Same source, same commands, different behaviour.
+
+\begin{concept}{First observation: ``it works for me'' is data}
+Two builds of identical source behaving differently is not noise. It says the fault depends on
+something that varies between builds --- almost always \emph{layout}: addresses, sizes, alignment.
+That single observation already eliminates whole categories of bug (logic errors, race conditions)
+and points at memory.
+\end{concept}
+
+\section{Step 1: catch the fault instead of the reboot}
+
+\begin{lstlisting}[style=sh]
+qemu-system-i386 -drive format=raw,file=build/kernel.img \
+    -display none -no-reboot -d int,cpu_reset -D trace.log
+\end{lstlisting}
+
+QEMU now exits with \cod{Triple fault} instead of rebooting. The tail of the log:
+
+\begin{lstlisting}[style=txt]
+   278: v=0e e=0002 i=0 cpl=0 IP=0008:0000ad98 SP=0010:c0000000 CR2=bffffffc
+   ...
+   279: v=08 e=0000 i=0 cpl=0 IP=0008:0000ad98 SP=0010:c0000000
+   ...
+check_exception old: 0x8 new 0xe
+Triple fault
+\end{lstlisting}
+
+Reading it with the table from the previous chapter:
+
+\begin{itemize}
+  \item \cod{v=0e}: a page fault, \cod{e=0002} means a write to a non-present page.
+  \item \cod{CR2=bffffffc}: the address accessed was \hexa{BFFFFFFC}.
+  \item \cod{SP=c0000000}: the stack pointer was \hexa{C0000000}.
+  \item Then \cod{v=08}: a double fault. Then triple fault.
+\end{itemize}
+
+\begin{concept}{Step 1 conclusion}
+\reg{ESP} is \hexa{C0000000} and the faulting address is \hexa{BFFFFFFC} --- exactly four bytes
+below. A push. \hi{This is a stack overflow}, matching the signature from Chapter 28
+precisely.
+
+And \hexa{C0000000} is \cod{HEAP\_START}. So a stack allocated from the kernel heap has grown down
+past the very beginning of the heap.
+\end{concept}
+
+\section{Step 2: find out where}
+
+\begin{lstlisting}[style=sh]
+i686-elf-nm -n build/kernel.elf | grep " [tT] "
+\end{lstlisting}
+
+Matching \cod{IP=0000ad98} against the symbol table gives \cod{vga\_text\_writeline + 0x0} --- the
+function's very first instruction, \cod{push ebp}. Consistent: the stack was already exhausted, and
+the first push of the next call tipped it over.
+
+But that only says \emph{where it ran out}, not \emph{why}. For that, look further back in the log.
+
+\section{Step 3: the pattern before the crash}
+
+\begin{lstlisting}[style=txt]
+   240: v=00 e=0000 i=0 cpl=0 IP=0008:0000ad47 SP=0010:c00016ec
+   241: v=00 e=0000 i=0 cpl=0 IP=0008:0000ad47 SP=0010:c0001650
+   242: v=00 e=0000 i=0 cpl=0 IP=0008:0000ad47 SP=0010:c00015b4
+   ...
+   277: v=00 e=0000 i=0 cpl=0 IP=0008:0000ad47 SP=0010:c0000060
+   278: v=0e ...                                SP=0010:c0000000
+\end{lstlisting}
+
+This is the answer, and it is unmistakable:
+
+\begin{itemize}
+  \item \cod{v=00} is \hi{exception 0: divide by zero}.
+  \item The same instruction address, \hexa{AD47}, every time.
+  \item \reg{ESP} decreasing by exactly \hexa{9C} (156 bytes) each round.
+  \item Exactly 107 repetitions (log entries 171 to 277) before the stack is exhausted ---
+        and $107 \times \hexa{9C} = 16{,}692$ bytes, which is the 16 KB kernel stack.
+\end{itemize}
+
+\begin{concept}{Step 3 conclusion}
+An infinite recursion. Something divides by zero; the handler tries to print the error; printing
+divides by zero again. Each round consumes 156 bytes of stack and never returns. Exactly the
+scenario described in Chapter 20 --- now observed rather than predicted.
+\end{concept}
+
+\section{Step 4: what is being divided}
+
+\begin{lstlisting}[style=sh]
+i686-elf-objdump -d -S build/kernel.elf --start-address=0xad30 --stop-address=0xad80
+\end{lstlisting}
+
+\begin{lstlisting}[style=txt]
+    ad39:  mov 0x8(%ebp),%eax
+    ad3c:  mov 0x8(%eax),%ecx      ; ECX = terminal->width
+    ad3f:  mov -0xc(%ebp),%eax     ; EAX = pos
+    ad42:  mov $0x0,%edx
+    ad47:  div %ecx                ; <-- the faulting instruction
+\end{lstlisting}
+
+Which is this source line:
+
+\begin{lstlisting}[style=c]
+terminal->row = pos / terminal->width;
+\end{lstlisting}
+
+So \cod{terminal->width} is zero. But \cod{vga\_text\_init} sets it to 80 during boot, and the
+system clearly printed many lines successfully before failing. \hi{Therefore something
+overwrote it.}
+
+\section{Step 5: who could overwrite it}
+
+\begin{lstlisting}[style=sh]
+i686-elf-nm build/kernel.elf | grep -E " (B|b) |_kernel_end"
+\end{lstlisting}
+
+\begin{lstlisting}[style=txt]
+00013188 B terminal
+00013400 B tss
+00013468 B _kernel_end
+\end{lstlisting}
+
+Now the arithmetic from Chapter 25:
+
+$$\hexa{13468} \div \hexa{1000} = 19.27 \rightarrow 19$$
+
+The protection loop is \cod{for (i = 9; i < 19; i++)}, protecting frames 9--18, that is
+\hexa{9000}--\hexa{12FFF}. \hi{Frame 19 --- \hexa{13000}--\hexa{13FFF} --- is left free.} And
+\cod{terminal} is at \hexa{13188}, inside it.
+
+The chain is now complete:
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize,
+  n/.style={draw=grayborder,rounded corners=2pt,minimum width=10.6cm,minimum height=0.62cm,align=left,inner xsep=8pt}]
+  \node[n,fill=accentlight,draw=accent] (a) {1. \texttt{\_kernel\_end} is not page-aligned; the division truncates};
+  \node[n,fill=accentlight,draw=accent,below=0.2cm of a] (b) {2. The last partial page of the kernel is not marked used};
+  \node[n,fill=amberlight,draw=amber,below=0.2cm of b] (c) {3. \texttt{alloc\_frame()} hands out frame 19 to the program loader};
+  \node[n,fill=amberlight,draw=amber,below=0.2cm of c] (d) {4. \texttt{memcpy} writes the shell binary over the kernel's globals};
+  \node[n,fill=redlight,draw=red,below=0.2cm of d] (e) {5. \texttt{terminal.width} becomes 0};
+  \node[n,fill=redlight,draw=red,below=0.2cm of e] (f) {6. The next print divides by zero};
+  \node[n,fill=redlight,draw=red,below=0.2cm of f] (g) {7. The handler prints, which divides by zero, forever};
+  \node[n,fill=redlight,draw=red,below=0.2cm of g] (h) {8. Kernel stack exhausted $\rightarrow$ page fault $\rightarrow$ double $\rightarrow$ triple fault $\rightarrow$ reboot};
+  \foreach \x/\y in {a/b,b/c,c/d,d/e,e/f,f/g,g/h} \draw[-{Stealth[length=2mm]},gray] (\x)--(\y);
+\end{tikzpicture}
+\end{center}
+
+\section{Step 6: confirm by fixing}
+
+A hypothesis is not a diagnosis until the fix proves it. One line:
+
+\begin{lstlisting}[style=c]
+uint32_t kernel_frame_end = ((uint32_t)&_kernel_end + FRAME_SIZE - 1) / FRAME_SIZE;
+\end{lstlisting}
+
+Rebuild, boot:
+
+\begin{lstlisting}[style=txt]
+Welcome to the lytlnyblOS!
+Kernel multiprocessing tests:
+NEW KERNEL PROCESS RUNNING
+BACK IN MAIN PROCESS
+Memory allocation tests:
+Values: 10 20 30 40 50
+Filesystem tests:
+Root directory contents:
+bin file.txt notes.txt
+Bin directory contents:
+user_test shell
+Running shell:
+>
+\end{lstlisting}
+
+Stable, with a working prompt, and still stable ten seconds later. Confirmed.
+
+\section{Why the prebuilt image was fine}
+
+Because \cod{\_kernel\_end} lands somewhere different in every build. In the repository's prebuilt
+image, \cod{kernel.bin} is 22,920 bytes; in the clean rebuild it is 22,888. A 32-byte difference ---
+from nothing more than toolchain version --- moved which globals fall in the unprotected last page.
+
+\begin{concept}{The general lesson}
+\hi{The bug was always there.} It was present in every build, including the ones that worked
+perfectly. What varied was only whether it had visible consequences.
+
+This is the defining property of latent memory bugs, and why ``it works'' is such weak evidence in
+systems programming. The fix is not to test more; it is to remove the class of error --- here, by
+always rounding up when converting a byte address to a page index.
+\end{concept}
+
+\begin{recipe}{reproducing the reboot loop}{ch45-reboot-loop}
+Injects the fault deliberately --- a kernel process sets \cod{terminal.width = 0} and then prints
+--- so the failure is reproducible instead of depending on where \cod{\_kernel\_end} happens to
+land.
+
+\cod{make trace} is the target to use. It boots with \cod{-no-reboot -d int,cpu\_reset}, stops at
+the triple fault instead of restarting, and prints the last exceptions. You get the signature to
+recognise: a run of \cod{v=00} at one fixed instruction address with \reg{SP} falling by exactly
+\hexa{9C} each time.
+
+The addresses will not match the ones quoted above --- the fault is injected at a different point
+in boot, on a different stack --- but the recursion signature is identical, and that is the part
+worth being able to spot.
+\end{recipe}
+
+\section{The method, generalised}
+
+\begin{enumerate}
+  \item \textbf{Make the failure stop instead of hiding.} \cod{-no-reboot} turns an
+        information-free reboot loop into a log that ends at the fault.
+  \item \textbf{Read the last fault precisely.} Vector, error code, \reg{CR2}, \reg{ESP}. Each is a
+        strong constraint.
+  \item \textbf{Look for a pattern before it.} A repeating vector at a fixed address with a
+        monotonically moving \reg{ESP} is recursion. One-off faults are different bugs entirely.
+  \item \textbf{Map addresses back to source.} \cod{nm} and \cod{objdump} turn a hex address into a
+        line of C.
+  \item \textbf{Ask what could have written that value} rather than what read it. The reader is
+        rarely the culprit.
+  \item \textbf{Prove it with a fix.} If the minimal fix does not eliminate the symptom, the
+        diagnosis is wrong, however convincing it sounded.
+\end{enumerate}
+
+% ============================================================
+\chapter{Known issues and how to fix them}
+
+\begin{goals}
+  \item Have a single list of every weakness identified in this course
+  \item Know the relative priority of each
+  \item Have a concrete starting point for contributing
+\end{goals}
+
+Everything below was identified while writing this course, by reading the code and by running the
+system. They are grouped by severity. None of them makes the project less valuable as teaching
+material --- several of them make it \emph{more} valuable, because working through the fix teaches
+more than reading correct code would.
+
+\section{Serious: correctness and safety}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}p{3.3cm} X p{2.9cm}@{}}
+\toprule
+\textbf{Issue} & \textbf{Effect} & \textbf{Where} \\
+\midrule
+Unvalidated user pointers & A user program can make the kernel write a zero byte to any address, including kernel memory & \cod{interrupts.c}, \cod{SYSCALL\_WRITE} \\[3pt]
+Write one byte past \cod{count} & Corrupts the caller's buffer; triggered by the shell's \cod{cat} & \cod{interrupts.c} \\[3pt]
+\cod{load\_program} return not checked & \cod{run} on a missing file hangs the shell forever & \cod{interrupts.c}, \cod{FS\_RUN} \\[3pt]
+Page index rounding & Latent: the kernel's last partial page could be handed out & \cod{pmm.c} --- \textbf{fixed}, see Ch.\ 45 \\[3pt]
+VLA on the kernel stack & Programs over $\sim$14 KB overflow the 16 KB kernel stack & \cod{loader.c} \\[3pt]
+\cod{destroy\_process} head removal & A terminated head process is never unlinked & \cod{procman.c} \\[3pt]
+\cod{unmap\_page} on the kernel directory & Punches a permanent hole in the identity map shared by all processes & \cod{procman.c} \\[3pt]
+No \cod{free\_frame} on teardown & Physical memory leaks on every process exit & \cod{procman.c} \\[3pt]
+\cod{kfree} of the running kernel stack & Use-after-free during \cod{exit} & \cod{context.c} \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{Moderate: robustness}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}p{3.3cm} X p{2.9cm}@{}}
+\toprule
+\textbf{Issue} & \textbf{Effect} & \textbf{Where} \\
+\midrule
+No idle process & \cod{get\_next\_process} can return a non-runnable process; the kernel busy-waits instead of halting & \cod{scheduler.c} \\[3pt]
+\cod{\_start} vs \cod{start} & The shell's entry point works only by link order & \cod{shell.c}, \cod{user.ld} \\[3pt]
+Uninitialised \cod{word\_count} & Shell behaviour depends on stack garbage & \cod{shell.c} \\[3pt]
+\cod{tokenize\_line} capacity & More than 8 words overflows a heap allocation & \cod{shell.c} \\[3pt]
+Word strings never freed & The shell leaks memory per command & \cod{shell.c} \\[3pt]
+\cod{read} result ignored & \cod{strlen} on a non-terminated buffer & \cod{shell.c} \\[3pt]
+User stack is one page & Deep recursion kills the process instead of growing the stack & \cod{procman.c} \\[3pt]
+Only 4 MB identity-mapped & A ceiling on total allocation; faults if crossed & \cod{vmm.c} \\[3pt]
+No ATA timeouts & A stuck disk hangs the kernel forever & \cod{ata.c} \\[3pt]
+Global descriptor table & Descriptors are shared between processes and leak on exit & \cod{fs\_manager.c} \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{Minor: hygiene}
+
+\begin{itemize}
+  \item No \cod{-MMD} header dependencies in the Makefile --- editing a header rebuilds nothing.
+  \item No \cod{-Wall -Wextra}.
+  \item \cod{LD = ld} rather than \cod{i686-elf-ld}.
+  \item \cod{rootfs/bin/*} tracked in git although generated.
+  \item \cod{\_\_attribute\_\_((packed))} on \cod{process\_t}, where it is unnecessary and harmful.
+  \item \cod{syscall\_entry} pushes the interrupt number and error code in the opposite order to the
+        ISR stubs.
+  \item \cod{timer\_wait\_ms} counts ticks, not milliseconds, despite its name.
+  \item The intentional fall-through in \cod{keyboard\_handler} is not marked as such.
+  \item \cod{vga\_text\_write\_dec(t, 0)} prints the \cod{'0'} but does not advance the cursor, so
+        the next thing written covers it and the zero disappears. Every other value goes through a
+        loop that advances correctly. Found by running the Chapter 27 example, and hit again in the
+        Chapter 39 one.
+  \item No scrolling: the screen wraps instead.
+  \item VGA text wraps at 60 sectors' worth of kernel with no build-time check.
+\end{itemize}
+
+\section{A suggested order of work}
+
+If you want to improve the project, this order gives the most benefit for the least risk:
+
+\begin{enumerate}
+  \item \textbf{\cod{-MMD} in the Makefile.} Five minutes, and it removes an entire class of
+        confusing rebuild bugs. Do this before touching anything else.
+  \item \textbf{The three-line NULL check in \cod{FS\_RUN}.} Turns a hang into an error message.
+  \item \textbf{Round up in \cod{pmm.c}.} Already done --- see Chapter 45 --- but read the
+        diagnosis, because the same truncation pattern can appear anywhere a byte address is
+        converted to a page or block index.
+  \item \textbf{A \cod{copy\_from\_user} / \cod{copy\_to\_user} pair.} The highest-value change in
+        the codebase; closes the whole unvalidated-pointer category.
+  \item \textbf{An idle process.} Makes the scheduler correct by construction and lets the CPU
+        actually sleep.
+  \item \textbf{Fix \cod{destroy\_process}} --- unlink correctly, stop unmapping from
+        \cod{kernel\_directory}, free the frames, defer the \cod{kfree} of the running stack.
+  \item \textbf{Stream the program loader} page by page instead of the VLA.
+  \item \textbf{Shell hygiene}: initialise the counter, enforce capacity, free the words, use
+        \cod{read}'s return value.
+\end{enumerate}
+
+% ============================================================
+\chapter{Where to go from here}
+
+\begin{goals}
+  \item Know which extensions are worth attempting and in what order
+  \item Understand what each one teaches
+\end{goals}
+
+\section{Extensions, by difficulty}
+
+\subsection{Approachable}
+
+\begin{description}
+  \item[Screen scrolling] Move 24 rows up with \cod{memcpy} and clear the last. Teaches: the VGA
+    buffer layout, and why terminals behave as they do.
+  \item[Arrow keys] The extended-scancode path already exists and does nothing. Fill it in, then
+    add a command history to the shell. Teaches: scancode handling and line editing.
+  \item[More commands] \cod{help}, \cod{clear}, \cod{echo}. Requires first relaxing the
+    \cod{word\_count != 2} restriction. Teaches: argument parsing.
+  \item[Buffered \cod{printf}] Accumulate and flush on newline. Teaches: why real libraries buffer,
+    and how much system calls cost.
+\end{description}
+
+\subsection{Moderate}
+
+\begin{description}
+  \item[Growing the user stack on demand] Catch a page fault just below the stack region and map a
+    new page. Fifteen lines that turn a crash into a feature. Teaches: what page faults are really
+    for.
+  \item[Indirect blocks] An eleventh inode pointer that points at a block of pointers. Raises the
+    file size limit from 5 KB to $\sim$69 KB. Teaches: how real filesystems scale.
+  \item[\cod{.} and \cod{..}, and a working directory] Teaches: path resolution and per-process
+    state.
+  \item[Keyboard ring buffer] Move the interrupt handler's writes into a kernel buffer and copy to
+    user space in process context. Teaches: why interrupt handlers should be short, and removes the
+    \reg{CR3} manipulation.
+  \item[Priorities in the scheduler] Give interactive processes shorter, more frequent slices.
+    Teaches: what schedulers actually do.
+\end{description}
+
+\subsection{Ambitious}
+
+\begin{description}
+  \item[ELF loading] Parse real ELF headers instead of flat binaries. Teaches: how program loading
+    works everywhere else, and enables separate read-only text and writable data.
+  \item[Separate \cod{fork} and \cod{exec}] Requires copying an address space. Copy-on-write makes
+    it efficient and is a beautiful use of page faults. Teaches: the core of Unix process creation.
+  \item[Disk interrupts instead of polling] Frees the CPU during I/O. Teaches: asynchronous I/O and
+    why it complicates everything.
+  \item[Higher-half kernel] Move the kernel to \hexa{C0000000} and give user space the whole lower
+    range. Teaches: how real systems lay out address spaces, and a great deal about paging.
+  \item[Pipes] \cod{ls / | cat}. Requires a kernel buffer, blocking reads and writes, and shell
+    syntax. Teaches: inter-process communication.
+\end{description}
+
+\section{A closing thought}
+
+The system in this course is about 5,500 lines. Linux is around 30 million. The difference is not
+conceptual --- it is drivers, architectures, filesystems, protocols, decades of edge cases, and
+performance work.
+
+The concepts you have now are the same ones. A page table in Linux is a page table here. A context
+switch there saves the same registers. A system call crosses the same boundary in the same way. When
+you read that a CPU vulnerability breaks the isolation between user space and kernel space, you now
+know exactly what that sentence means and exactly which bit is involved.
+
+That is what this was for.
+
+\begin{summary}
+You started not knowing what a register was. You now understand a complete operating system, you
+can read a processor trace and find a memory corruption bug from it, and you have a list of real
+improvements you could make to a real codebase. The appendices that follow are reference material
+for when you do.
+\end{summary}

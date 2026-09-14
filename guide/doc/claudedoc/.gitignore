@@ -1,0 +1,7 @@
+*.aux
+*.log
+*.toc
+*.out
+*.lof
+*.lot
+examples/*/build/

@@ -1,0 +1,353 @@
+\documentclass[11pt,oneside]{book}
+\usepackage[a4paper,margin=25mm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{fancyhdr}
+\usepackage{graphicx}
+\usepackage{verbatim}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small lytlnyblOS Learning Manual}
+\fancyhead[R]{\small \thepage}
+\renewcommand{\headrulewidth}{0.3pt}
+
+\newcommand{\pathname}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\checkpoint}[1]{\medskip\noindent\textbf{Checkpoint.} #1\medskip}
+\newcommand{\exercise}[1]{\medskip\noindent\textbf{Try it.} #1\medskip}
+
+\begin{document}
+\begin{titlepage}
+\centering
+\vspace*{28mm}
+{\Huge\bfseries lytlnyblOS\\[4mm] Learning Manual\par}
+\vspace{10mm}
+{\Large Build a mental model of a small 32-bit operating system\par}
+\vfill
+\begin{minipage}{0.8\textwidth}
+\centering
+An original, source-led introduction for a programmer starting from zero. Read it beside the final implementation in \pathname{lytlnybl/}, experiment in QEMU, and make small changes safely.
+\end{minipage}
+\vfill
+{\large September 2026\par}
+\end{titlepage}
+
+\frontmatter
+\chapter*{How to use this manual}
+\addcontentsline{toc}{chapter}{How to use this manual}
+This book explains the operating system that is present in this repository. It is not a line-by-line copy of the existing guide. Its job is to give a new learner a reliable map: what each component does, why it must exist, which source file owns it, and how to test an idea before moving on.
+
+The project is a deliberately small 32-bit x86 operating system. It boots through a BIOS-compatible virtual machine, switches from 16-bit real mode to 32-bit protected mode, then runs a C kernel. The finished system includes text output, interrupts, a timer, a keyboard, page-based memory management, a heap, cooperative pieces of process management, user mode, system calls, a tiny filesystem, a program loader, and a shell.
+
+You do not need to memorize every x86 detail. For each chapter, first understand the promise made by a subsystem. Then open the named files and trace the path of one request through them. Finally, perform the checkpoint. Small operating systems are unforgiving: one wrong address or one missing interrupt acknowledgement can stop everything. That is exactly why short experiments are more valuable than large edits.
+
+\section*{What you should know first}
+You should be comfortable with variables, functions, arrays, pointers, and compiling a small C program. Some basic hexadecimal notation is enough: \texttt{0x10} is sixteen, and an address is a number that names a byte in memory. Assembly is introduced only where the CPU interface requires it.
+
+\section*{Safety and scope}
+Run the system in QEMU, not on a physical disk. The build process creates a disposable raw disk image under \pathname{lytlnybl/build/}. This implementation is a teaching kernel, not a secure or complete operating system. Several choices trade robustness for clarity; the final chapter names useful improvements.
+
+\tableofcontents
+\mainmatter
+
+\chapter{The whole system at a glance}
+An operating system is the program that takes control after firmware and provides controlled access to hardware. This one is a chain of hand-offs. Each link depends on the one before it.
+
+\begin{verbatim}
+BIOS -> boot sector -> kernel entry assembly -> kernel_main()
+     -> interrupt and memory services -> processes -> user shell
+     -> filesystem and disk driver
+\end{verbatim}
+
+The most important folders are listed below. Treat headers in \pathname{lytlnybl/include/} as the contracts between modules and \pathname{.c}/\pathname{.asm} files as their implementations.
+
+\begin{longtable}{p{0.26\linewidth}p{0.66\linewidth}}
+\textbf{Location} & \textbf{Responsibility}\\ \hline
+\pathname{boot/} & The 512-byte boot sector that BIOS can load.\\
+\pathname{kernel/} & Protected-mode entry point, interrupts, utility code, and hardware drivers.\\
+\pathname{memory/} & Physical frames, page tables, and the kernel heap.\\
+\pathname{tasks/} & Processes, saved CPU context, scheduling, and loading user code.\\
+\pathname{filesystem/} & On-disk structures and higher-level file operations.\\
+\pathname{user/} & Tiny user library and programs, including the shell.\\
+\pathname{tools/mkfs.c} & A host-side program that puts \pathname{rootfs/} files in the image.\\
+\pathname{Makefile} & The build recipe that connects all these pieces.\\
+\end{longtable}
+
+\section{Build products}
+The Makefile uses an \texttt{i686-elf} cross compiler for code that will run in the guest and the host compiler for \texttt{mkfs}. Cross compilation matters because the kernel must not silently depend on the host operating system or its startup files.
+
+\begin{verbatim}
+bootloader.asm -> bootloader.bin
+kernel C + assembly -> kernel.elf -> kernel.bin
+user C + libc -> program ELF -> flat program binary
+bootloader.bin + kernel.bin -> kernel.img
+rootfs/ + kernel.img -> mkfs -> formatted filesystem image
+\end{verbatim}
+
+From \pathname{lytlnybl/}, run \texttt{make run}. It builds \pathname{build/kernel.img} and gives that image to \texttt{qemu-system-i386}. If tools are missing, install NASM, QEMU, Make, a host C compiler, and an \texttt{i686-elf} GCC/binutils cross toolchain. Do not replace the cross compiler with normal GCC unless you understand the consequences of its host assumptions.
+
+\checkpoint{Before reading further, locate the \texttt{run} target in \pathname{lytlnybl/Makefile}. Explain why \texttt{mkfs} is compiled with \texttt{gcc} while the kernel uses \texttt{i686-elf-gcc}.}
+
+\chapter{Booting: from firmware to your first instruction}
+\section{The boot contract}
+On a BIOS-style machine, firmware searches for a bootable disk, reads its first 512-byte sector at physical address \texttt{0x7C00}, and checks for the two-byte signature \texttt{0xAA55}. If the signature is present, it begins executing the bytes it just loaded. There is no C runtime, heap, or operating system service yet.
+
+The file \pathname{boot/bootloader.asm} meets this contract. Its final two lines pad the sector to 510 bytes and append the signature. This fixed size is an external rule imposed by BIOS, so a bootloader that grows past it stops being bootable.
+
+\section{Real mode and segmented addresses}
+The processor begins in 16-bit real mode. An address is commonly written as \texttt{segment:offset}; its physical value is approximately \texttt{segment * 16 + offset}. The bootloader initializes \texttt{DS} with \texttt{0x07C0}, making labels in its loaded sector accessible through the data segment. It prints messages through BIOS interrupt \texttt{0x10}, gathers the E820 memory map through \texttt{int 0x15}, and reads kernel sectors through \texttt{int 0x13}.
+
+The disk read loads 60 sectors beginning at disk sector 2 into \texttt{0x9000}. The boot sector itself occupies the first sector. The far jump \texttt{jmp 0900h:0000} transfers execution to the loaded kernel entry.
+
+\begin{verbatim}
+mov ax, 0900h        ; destination segment: physical 0x9000
+mov es, ax
+mov ah, 02h          ; BIOS disk read service
+mov al, 60           ; number of 512-byte sectors
+mov cl, 02h          ; start at sector 2
+int 13h
+jmp 0900h:0000
+\end{verbatim}
+
+\section{The memory map}
+The bootloader stores E820 entries at \texttt{0x5000} and their count at \texttt{0x4FFC}. Later, \pathname{memory/pmm.c} reads that data to decide which physical pages can be allocated. This is a useful early lesson: a boot-time data structure is only useful if both producer and consumer agree on its exact address and layout.
+
+\exercise{Change only a bootloader greeting, rebuild, and confirm it appears before the kernel greeting. Then restore it. If NASM reports that the padding count is negative, the boot sector is too large.}
+
+\chapter{Entering 32-bit protected mode}
+\section{Why change CPU mode?}
+Real mode offers BIOS services but has no useful isolation or modern paging. Protected mode gives 32-bit registers, privilege levels, descriptor tables, and the paging machinery used later by this project. Entering it is a precise sequence, implemented in \pathname{kernel/kernel_intro.asm}.
+
+\section{The Global Descriptor Table}
+The Global Descriptor Table (GDT) describes segments. This project chooses ``flat'' code and data segments: their base is zero and their limit covers the 32-bit address space. Segmentation therefore does not divide the application into separate regions; paging will do most address management later. The GDT still supplies selectors and ring permissions.
+
+The entry assembly loads the GDT with \texttt{lgdt}, sets bit 0 (PE) in control register \texttt{CR0}, then performs a far jump. The far jump is essential because it loads \texttt{CS} from the new protected-mode descriptor and flushes the old instruction interpretation. It then loads \texttt{DS}, \texttt{ES}, \texttt{FS}, \texttt{GS}, and \texttt{SS}, creates a kernel stack, and calls C.
+
+\begin{verbatim}
+cli
+lgdt [gdtr]
+mov eax, cr0
+or eax, 1
+mov cr0, eax
+jmp CODE_SELECTOR:protected_mode_entry
+\end{verbatim}
+
+\section{Linking fixes addresses}
+The linker script \pathname{kernel/linker.ld} places the kernel at \texttt{0x9000}, matching the bootloader destination. The linker resolves symbol references as if the first kernel byte lives there. If the load address and linker address disagree, jumps and data references point somewhere else.
+
+\checkpoint{Trace the three occurrences of \texttt{0x9000}: the bootloader destination, the linker script, and the kernel's intended start. They form one contract.}
+
+\chapter{The first C kernel and text output}
+\section{Kernel initialization order}
+\pathname{kernel/kernel_main.c} is the first normal C function. It initializes components in dependency order: screen output first, then the interrupt table, physical memory, virtual memory, heap, process manager, drivers, TSS, and filesystem manager. That order is not cosmetic. For example, the heap needs pages; processes need a heap and paging; disk-based files need the ATA driver.
+
+\section{VGA text mode}
+The familiar console is not a terminal emulator at this stage. VGA text mode exposes a memory buffer at \texttt{0xB8000}. Each screen cell uses two bytes: an ASCII character and a colour attribute. \pathname{kernel/drivers/vga_text.c} wraps that raw memory in a \texttt{vga\_text} structure that tracks a cursor, colors, line wrapping, scrolling, and number formatting.
+
+Writing directly is enough to prove the kernel runs:
+
+\begin{verbatim}
+volatile char *vga = (volatile char *)0xB8000;
+vga[0] = 'C';
+vga[1] = 0x02;   /* green foreground on black */
+\end{verbatim}
+
+\texttt{volatile} tells the compiler that the store is observable hardware I/O and must not be optimized away. The driver is preferable for real messages because it owns cursor state and scrolling.
+
+\exercise{Add one \texttt{vga\_text\_writeline} after \texttt{init\_vmm()} to record successful paging initialization. A message before that call tests a different part of the startup path.}
+
+\chapter{Interrupts: events that pause the current code}
+\section{Three kinds of events}
+An exception is raised by the CPU while executing an instruction, such as divide-by-zero or a page fault. A hardware interrupt is raised by a device, such as the keyboard or timer. A software interrupt is an explicit instruction; this kernel uses \texttt{int 0x80} for system calls. All arrive through the Interrupt Descriptor Table (IDT).
+
+\section{The IDT and assembly stubs}
+\pathname{kernel/interrupts.c} builds 256 IDT entries and loads the IDT register. Each gate names a handler address, a code selector, and flags. The assembly stubs in \pathname{kernel/interrupts.asm} save registers, arrange a \texttt{registers\_t} frame, call a C handler, restore state, and finish with \texttt{iret}. The exact stack layout must agree with \pathname{include/kernel/interrupts.h}; this is an ABI between assembly and C.
+
+\section{PIC remapping and acknowledgement}
+Old PC hardware routes IRQs through the Programmable Interrupt Controller. IRQ 0 and IRQ 1 would otherwise overlap CPU exception vectors, so \texttt{pic\_remap(32, 40)} moves them to IDT vectors 32--47. After an IRQ is handled, \texttt{pic\_send\_eoi()} sends End Of Interrupt. Without it, the PIC may refuse to deliver further interrupts.
+
+\section{Faults are diagnostics}
+The page-fault handler reads \texttt{CR2}, which contains the address that caused the fault, and decodes the error code. This is a model debugging feature: report the faulting address, access type, privilege level, and instruction pointer before changing code blindly.
+
+\checkpoint{Press a key in QEMU and trace the route: keyboard hardware, IRQ 1, remapped vector 33, \texttt{irq\_handler}, then \texttt{keyboard\_handler}.}
+
+\chapter{Timer and keyboard drivers}
+\section{The timer creates time}
+\pathname{kernel/drivers/timer.c} programs the programmable interval timer and counts ticks in its IRQ handler. At 100 Hz, an interrupt arrives roughly every 10 milliseconds. The handler wakes processes whose \texttt{wake\_tick} has passed and calls the scheduler. A timer is what turns a kernel from a straight-line program into a system that can revisit tasks.
+
+\section{Keyboard input is asynchronous}
+\pathname{kernel/drivers/keyboard.c} reads scan codes from I/O port \texttt{0x60}, translates selected codes to characters, and updates the process currently blocked on standard input. Enter marks the read complete; backspace changes both the display and the buffered input. This separation matters: a keystroke can arrive while unrelated kernel code is running.
+
+\section{Polling versus interrupts}
+Polling repeatedly asks a device whether it has work. Interrupt-driven input lets the CPU do other work and be notified later. This system still has simple shared state and no locking, which is acceptable for a small single-CPU teaching kernel but becomes unsafe as drivers and CPUs multiply.
+
+\exercise{Find the timer frequency argument in \texttt{timer\_init(100)}. Change it to a noticeably lower value, run the system, and observe how this changes scheduler responsiveness. Restore 100 after the experiment.}
+
+\chapter{Physical memory: allocating 4 KiB frames}
+\section{Physical and virtual are different questions}
+Physical memory is the actual RAM exposed by the machine. Virtual memory is the address space seen by code. The Physical Memory Manager (PMM) answers ``which 4 KiB physical frame is free?'' The Virtual Memory Manager (VMM) answers ``which frame should this virtual address use?'' Keeping those questions separate makes the design understandable.
+
+\pathname{memory/pmm.c} uses a bitmap. One bit represents one 4096-byte frame. A set bit means reserved or used; a clear bit means available. The BIOS E820 map tells the PMM which ranges may be cleared. The bitmap itself, the loaded kernel, VGA area, and other critical ranges must remain marked used.
+
+For a physical address \(P\), its frame index is \(P / 4096\). For frame index \(F\), its address is \(F * 4096\). \texttt{alloc\_frame()} finds a clear bit, sets it, and returns the frame address. \texttt{free\_frame()} reverses that operation.
+
+\checkpoint{Use \texttt{print\_bitmap\_summary()} temporarily after \texttt{init\_pmm()}. Relate the printed free/reserved ranges to the BIOS map stored by the bootloader.}
+
+\chapter{Paging and the kernel heap}
+\section{Two-level paging}
+In 32-bit x86 paging, a virtual address splits into a directory index, a table index, and a page offset:
+
+\begin{verbatim}
+31                         22 21                         12 11        0
++----------------------------+-----------------------------+------------+
+| page-directory index (10)  | page-table index (10)       | offset (12)|
++----------------------------+-----------------------------+------------+
+\end{verbatim}
+
+\pathname{memory/vmm.c} creates a page directory and an identity-mapped first page table, then loads its address into \texttt{CR3}. Setting bit 31 (PG) in \texttt{CR0} enables paging. Identity mapping means virtual address \texttt{x} initially refers to physical address \texttt{x}; it lets existing kernel code continue running during the transition.
+
+\texttt{map\_page()} extracts the two indexes, creates a table if needed, stores the physical frame and flags, and invalidates the single TLB entry when editing the active address space. The TLB is the processor's cache of recent translations; flushing it after a mapping edit prevents stale answers.
+
+\section{A simple kernel allocator}
+\pathname{memory/heap.c} maps an initial page at \texttt{HEAP\_START} (\texttt{0xC0000000}) and keeps a linked list of block headers. \texttt{kmalloc} uses first fit, splits a large free block, and grows the heap by mapping more frames. \texttt{kfree} marks a block free and merges adjacent free blocks.
+
+This is excellent learning code but not a production allocator. It is linear-time, has no alignment policy or corruption checks, and does not return frames to the PMM. Those limitations are opportunities for later work.
+
+\exercise{Draw the linked list after allocating 20 bytes, then 30 bytes, then freeing the first allocation. Explain why freeing only marks metadata; it does not erase the old payload.}
+
+\chapter{Processes and context switching}
+\section{What a process owns here}
+A process is represented by \texttt{process\_t} in \pathname{include/tasks/procman.h}. It stores a PID, state, saved registers, page directory, kernel stack, user stack information, and links to the next process. The possible states are running, ready, blocked, sleeping, and terminated.
+
+Creating a kernel process gives it the shared kernel address space and a kernel code selector. Creating a user process also creates a new page directory, copies the kernel mappings, allocates user stack and heap pages, and uses ring-3 code/data selectors. The code itself is mapped later by the loader.
+
+\section{Saving a paused CPU}
+The CPU does not know the high-level idea of a process. A context switch makes that illusion by saving the interrupted process's registers into its \texttt{process\_t}, selecting another process, switching \texttt{CR3} if necessary, restoring the new registers, and returning from the interrupt frame. \pathname{tasks/context.c} performs the C side; the interrupt return path finishes the hand-off.
+
+\section{Round-robin scheduling}
+\pathname{tasks/scheduler.c} chooses the next ready process by walking the linked list in a circle. Every \texttt{DEFAULT\_TIME\_SLICE} timer ticks it requests a switch. This is round-robin scheduling: easy to understand and fair among ready processes, but unaware of priority, deadlines, I/O cost, or multicore concerns.
+
+\checkpoint{In \pathname{kernel/kernel\_main.c}, find the demonstration \texttt{test\_process}. Explain why the timer is needed before the main kernel can return to it.}
+
+\chapter{User mode and system calls}
+\section{Privilege is a hardware rule}
+The processor distinguishes kernel privilege (ring 0) from user privilege (ring 3). User code should not run arbitrary I/O instructions or change page tables. When ring-3 code performs \texttt{int 0x80}, the IDT gate transfers execution to the kernel. The Task State Segment (TSS) supplies the kernel stack pointer the CPU must use while entering from user mode.
+
+\section{The syscall boundary}
+The user wrapper in \pathname{user/libc/syscalls.asm} follows a small register convention: \texttt{EAX} is the call number; \texttt{EBX}, \texttt{ECX}, and \texttt{EDX} are arguments; \texttt{EAX} returns the result. \pathname{kernel/interrupts.c} dispatches that number in \texttt{syscall\_handler}. Both header files define the same numeric constants, so changes must be made consistently.
+
+\begin{verbatim}
+mov eax, SYSCALL_WRITE
+mov ebx, 1          ; standard output
+mov ecx, buffer
+mov edx, count
+int 0x80
+\end{verbatim}
+
+The implemented calls cover exit, PID, yield, sleep, read/write, heap growth through \texttt{sbrk}, filesystem operations, open, and close. Standard input blocks the current process until keyboard input completes. The kernel wakes the parent process when a child exits.
+
+\section{The tiny user library}
+\pathname{user/libc/} supplies enough C facilities for programs: strings, character tests, formatting, memory allocation, and syscall wrappers. The user linker script fixes program code at \texttt{0x00400000}; \pathname{tasks/loader.c} maps file bytes there page by page.
+
+\exercise{Add a syscall only on paper first. Choose its number, user prototype, register arguments, kernel validation, return convention, and failure value. This design work prevents mismatched interfaces.}
+
+\chapter{Disk I/O and the filesystem}
+\section{ATA sectors}
+The ATA driver in \pathname{kernel/drivers/ata.c} reads and writes 512-byte sectors using legacy I/O ports. The driver waits for the device status to indicate readiness, chooses a sector, commands a read or write, and transfers words through the data port. The rest of the filesystem deliberately treats its block size as one sector, so one filesystem block is 512 bytes.
+
+\section{On-disk layout}
+The filesystem layout types and constants are in \pathname{include/filesystem/fs\_layout.h}. Its core structures are a superblock, allocation bitmap, inode table, data blocks, and fixed-size directory entries. The superblock records where each region begins. An inode records type, byte size, and a small array of data-block numbers. A directory is a file whose data blocks contain name-to-inode records.
+
+\begin{verbatim}
+filesystem region:  superblock | bitmap | inode table | data blocks
+file lookup:        /bin/shell -> root entry -> bin inode -> shell inode -> data blocks
+\end{verbatim}
+
+\pathname{filesystem/fs.c} implements the low-level rules: format the volume, allocate/free blocks and inodes, read/write inodes, add directory entries, and read/write file bytes. \pathname{filesystem/fs\_manager.c} is the convenience layer: resolve a slash-separated path, maintain open-file records and offsets, and expose operations such as \texttt{fs\_touch}, \texttt{fs\_mkdir}, \texttt{fs\_rm}, \texttt{fs\_read}, and \texttt{fs\_write}.
+
+\section{Host tool versus kernel code}
+\texttt{mkfs} is a normal host program. It opens \pathname{build/kernel.img}, formats the same layout, then walks \pathname{rootfs/} and copies host files into the image. It shares layout definitions with the kernel so both sides agree on the disk format. It must not share kernel driver code because the host already has file APIs.
+
+\checkpoint{Run the shell and use \texttt{ls /bin}. Then relate the visible \texttt{shell} file to the Makefile rule that copies its flat binary into \pathname{rootfs/bin/} before \texttt{mkfs} runs.}
+
+\chapter{Programs and the shell}
+\section{Loading a flat user binary}
+\texttt{load\_program(path)} opens a file, reads its bytes, creates a user process, allocates physical frames, copies file chunks into them, and maps them at \texttt{USER\_CODE\_BASE}. The user linker script uses exactly that base. This loader handles a simple flat binary; it does not parse ELF headers, perform relocations, or load shared libraries.
+
+\section{Reading the shell as a complete vertical slice}
+\pathname{user/programs/shell.c} is a REPL: print a prompt, read a line, tokenize it, choose a command, invoke library functions, and repeat. It reaches almost every operating-system layer:
+
+\begin{longtable}{p{0.24\linewidth}p{0.68\linewidth}}
+\textbf{Shell action} & \textbf{Path through the system}\\ \hline
+\texttt{ls /} & tokenizer $\rightarrow$ \texttt{fs\_ops} syscall $\rightarrow$ kernel path resolver $\rightarrow$ directory blocks $\rightarrow$ VGA output.\\
+\texttt{cat /notes.txt} & \texttt{open} $\rightarrow$ file descriptor $\rightarrow$ repeated \texttt{read} syscalls $\rightarrow$ \texttt{write} to standard output.\\
+\texttt{run /bin/user\_test} & filesystem operation $\rightarrow$ loader $\rightarrow$ new user process $\rightarrow$ parent shell blocks until child exit.\\
+\end{longtable}
+
+When learning a large code base, choose a vertical slice like this instead of reading folders in isolation. You will see why each boundary exists.
+
+\exercise{Create a small user program modeled on \pathname{user/programs/test.c}. Add a Makefile rule, copy the binary into \pathname{rootfs/bin/}, rebuild, and run it from the shell. Start with one \texttt{printf}.}
+
+\input{detailed-chapters}
+
+\chapter{A practical learning path}
+Work through these stages in order. Do not begin with a filesystem change if you cannot yet tell whether the kernel reached C.
+
+\begin{enumerate}
+\item Build and run the untouched image. Record each startup message.
+\item Change a boot greeting; verify it appears before protected mode.
+\item Add a VGA line in \texttt{kernel\_main}; verify the C hand-off.
+\item Trace one timer tick and one keyboard character through the IDT.
+\item Print PMM summary data, then allocate and free a frame in a controlled test.
+\item Map one new kernel page and observe a deliberate page fault with a clear diagnostic.
+\item Create two kernel processes that print distinct messages and watch round-robin progress.
+\item Add a harmless user program that calls \texttt{get\_pid()} and \texttt{write()}.
+\item Create, write, list, and read a file through the shell.
+\item Make one extension below and document its interface before coding it.
+\end{enumerate}
+
+\section{A debugging routine}
+First identify the latest guaranteed checkpoint. If boot text appears but C text does not, inspect the kernel load address, linker script, GDT, protected-mode jump, and stack. If the timer never fires, inspect IDT initialization, PIC remapping, and EOI. If a user program fails, verify its binary is in \pathname{rootfs}, its link base matches the loader mapping, and its page permissions include \texttt{PAGE\_USER}. Use QEMU's GDB mode (remove the comment on \texttt{-s -S} in the Makefile) when screen messages cannot narrow the failure enough.
+
+\chapter{What to improve next}
+The best next project is one that preserves an existing contract while strengthening it.
+
+\begin{itemize}
+\item Make the bootloader load a kernel larger than the current fixed 60 sectors, ideally from filesystem metadata.
+\item Validate user pointers before dereferencing syscall buffers in the kernel.
+\item Replace the flat loader with a minimal ELF loader and separate read-only code from writable data.
+\item Give each process its own open-file table instead of the current global table.
+\item Improve the allocator with alignment, error checks, and frame reclamation.
+\item Add nested directories fully, command parsing with arguments, and filesystem consistency checks.
+\item Add a serial debug driver so messages remain available when VGA code is suspect.
+\item Move toward higher-half kernel mappings only after you can explain every existing identity map.
+\end{itemize}
+
+\section*{Final perspective}
+You have now seen the minimum connected story behind an operating system: firmware gives control to a boot sector; the boot sector loads a kernel; the kernel establishes CPU rules; interrupts let devices and faults enter the kernel; memory managers allocate safe working space; processes preserve separate execution state; system calls cross the privilege boundary; and the filesystem makes data and programs persistent. Keep the source tree open, make one small observation at a time, and let each successful experiment become a new checkpoint.
+
+\appendix
+\input{source-reference}
+
+\backmatter
+\chapter*{Quick reference}
+\addcontentsline{toc}{chapter}{Quick reference}
+\begin{longtable}{p{0.29\linewidth}p{0.59\linewidth}}
+\textbf{Term} & \textbf{Meaning in this project}\\ \hline
+BIOS & Firmware interface that loads the boot sector in QEMU.\\
+GDT / IDT & Tables that describe protected-mode segments and event handlers.\\
+IRQ & Hardware interrupt request, such as timer IRQ 0 or keyboard IRQ 1.\\
+PMM frame & A 4096-byte physical memory unit tracked by a bitmap.\\
+Page mapping & A virtual-to-physical relation stored in page tables.\\
+CR3 & CPU register holding the active page-directory address.\\
+TSS & Structure providing a kernel stack for privilege transitions.\\
+PID & Small numeric identifier for a process.\\
+System call & Controlled request from user mode to kernel mode through \texttt{int 0x80}.\\
+Inode & Metadata record for a file or directory.\\
+File descriptor & Small integer naming an entry in the open-file table.\\
+MKFS & Host-side image formatter and \pathname{rootfs} importer.\\
+\end{longtable}
+
+\end{document}

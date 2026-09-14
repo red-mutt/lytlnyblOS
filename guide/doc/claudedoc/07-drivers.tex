@@ -1,0 +1,387 @@
+\part{Two drivers: heartbeat and ears}
+
+\chapter{The timer}
+
+\begin{goals}
+  \item How the PIT works and how to program a frequency
+  \item Why a system needs a heartbeat
+  \item What a ``tick'' is and what is measured with it
+\end{goals}
+
+\section{Why a timer matters so much}
+
+Without a periodic interrupt, an operating system cannot:
+
+\begin{itemize}
+  \item take the processor away from a program that will not give it up,
+  \item measure time at all,
+  \item wake a sleeping process,
+  \item time out a device that stopped responding.
+\end{itemize}
+
+The timer is what turns a passive kernel into an active one. It is the only thing in the system
+that happens \emph{without anyone asking}.
+
+\section{The PIT 8253/8254}
+
+The chip has an input clock of 1,193,182 Hz --- an absurd number that comes from dividing the
+original PC's colour television crystal. You cannot choose the frequency directly; you choose a
+\term{divisor}, and the chip fires at $1{,}193{,}182 / \text{divisor}$ Hz.
+
+\filetag{lytlnybl/kernel/drivers/timer.c}
+\begin{lstlisting}[style=c]
+void timer_init(uint32_t frequency) {
+    freq = frequency;
+    uint16_t divisor = 1193182 / frequency;
+
+    /* tell the PIT how we will send the divisor, and which mode */
+    outb(PIT_COMMAND, PIT_ACCESS_LOHIBYTE | PIT_MODE3 | PIT_CHANNEL0 | PIT_BINARY);
+    io_wait();
+
+    /* the divisor is 16 bits but the port is 8: send it in two halves */
+    outb(PIT_CHANNEL0_DATA, divisor & 0xFF);        /* low byte first */
+    io_wait();
+    outb(PIT_CHANNEL0_DATA, divisor >> 8);          /* then the high byte */
+}
+\end{lstlisting}
+
+The project calls \cod{timer\_init(100)}, so the divisor is $1{,}193{,}182 / 100 = 11{,}931$ and the
+interrupt fires 100 times per second. \hi{One tick equals 10 milliseconds.}
+
+\begin{warn}{The frequency is not exact}
+$1{,}193{,}182 / 11{,}931 = 100.0069$ Hz. The error is tiny but it accumulates: after an hour the
+clock has drifted by about a quarter of a second. Systems that need accurate time use a different
+source and periodically correct. For a teaching system, and for scheduling, it is irrelevant.
+\end{warn}
+
+\begin{concept}{Choosing the frequency is a trade-off}
+Higher frequency means finer time resolution and snappier process switching, but more interrupts
+per second and therefore more overhead: every tick costs a full save and restore of state. Lower
+frequency is cheaper but makes the system feel sluggish and coarse. 100 Hz is a classic
+compromise --- it was Linux's default for years.
+\end{concept}
+
+\section{What happens on every tick}
+
+\filetag{lytlnybl/kernel/drivers/timer.c}
+\begin{lstlisting}[style=c]
+volatile uint32_t ticks = 0;
+
+void timer_handler(registers_t* regs) {
+    ticks++;
+
+    /* wake any process whose sleep has expired */
+    process_t* traversal_process = process_head;
+    while (traversal_process) {
+        if (traversal_process->state == PROCESS_SLEEPING
+            && ticks >= traversal_process->wake_tick) {
+            traversal_process->state = PROCESS_READY;
+        }
+        traversal_process = traversal_process->next;
+    }
+
+    schedule(regs);     /* maybe switch process */
+}
+\end{lstlisting}
+
+Three jobs, in order: advance the clock, wake sleepers, and offer the scheduler a chance to switch.
+That last call is where preemptive multitasking actually happens, and Part IX takes it apart.
+
+\begin{concept}{Why \cod{volatile} on \cod{ticks}}
+\cod{ticks} is modified inside an interrupt handler and read from ordinary code. Without
+\cod{volatile}, a loop like \cod{while (ticks < target);} could be optimised into ``read once, loop
+forever'' --- the compiler has no way to know an interrupt changes it. This is the same reason as
+the VGA buffer in Chapter 19, from the opposite direction.
+\end{concept}
+
+\section{Waiting without a scheduler}
+
+Very early in boot, before processes exist, the kernel sometimes needs to wait. It does so crudely:
+
+\filetag{lytlnybl/kernel/drivers/timer.c}
+\begin{lstlisting}[style=c]
+void timer_wait_ms(uint32_t ms) {
+    uint32_t start = ticks;
+    while ((ticks - start) < ms) {
+        asm volatile ("hlt");
+    }
+}
+\end{lstlisting}
+
+\cod{hlt} halts the processor until the next interrupt. It is far better than an empty spin loop: it
+consumes no power and, in a virtual machine, does not peg a host CPU core at 100\,\%. The timer
+interrupt wakes it 100 times a second, the condition is rechecked, and off it goes again.
+
+\begin{warn}{The name lies}
+The parameter is called \cod{ms} but is really counted in ticks. With a 100 Hz timer, one tick is
+10 ms, so \cod{timer\_wait\_ms(10)} waits 100 ms, not 10. It is a real naming bug in the project.
+Harmless today because it is used once during boot, but exactly the kind of thing that wastes an
+afternoon later.
+\end{warn}
+
+% ============================================================
+\begin{recipe}{measuring time with the PIT}{ch23-timer}
+Times a piece of work by subtracting two tick readings, then reprograms the PIT to 1000 Hz and
+times the same work again. The number of ticks changes by a factor of ten while the work does not:
+the ruler changed, not the thing being measured.
+
+It also demonstrates the naming bug above --- \cod{timer\_wait\_ms(100)} is measured taking 100
+ticks, that is a full second, not 100 ms.
+\end{recipe}
+
+% ============================================================
+\chapter{The keyboard}
+
+\begin{goals}
+  \item What a scancode is and why it is not ASCII
+  \item How press and release are distinguished
+  \item How modifier keys are tracked
+  \item How a keystroke reaches a blocked user process
+\end{goals}
+
+\section{Scancodes are not characters}
+
+When you press a key, the keyboard does not send a letter. It sends a \term{scancode}: a number
+identifying \emph{a physical key in a physical position}. The key that says \cod{A} on a UK layout
+sends the same scancode as the one that says \cod{Q} on a French layout, because it is the same
+physical switch.
+
+Translating scancode to character is entirely the operating system's job, and it is what makes
+keyboard layouts possible.
+
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize,
+  b/.style={draw=accent,fill=accentlight,rounded corners=2pt,minimum width=2.5cm,minimum height=0.85cm,align=center}]
+  \node[b] (a) {physical key\\{\tiny you press it}};
+  \node[b,right=0.8cm of a] (c) {scancode\\{\tiny e.g. 0x1E}};
+  \node[b,right=0.8cm of c] (d) {keymap table\\{\tiny lookup}};
+  \node[b,right=0.8cm of d] (e) {character\\{\tiny 'a' or 'A'}};
+  \foreach \x/\y in {a/c,c/d,d/e} \draw[-{Stealth[length=2.2mm]},accent,thick] (\x)--(\y);
+\end{tikzpicture}
+\end{center}
+
+\section{Press and release}
+
+Every key generates \emph{two} events: one when pressed (\term{make}) and one when released
+(\term{break}). The distinction is encoded in bit 7:
+
+\begin{center}
+\begin{tabularx}{0.92\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Scancode} & \textbf{Bit 7} & \textbf{Meaning} \\
+\midrule
+\hexa{1E} & 0 & The \cod{A} key was pressed \\
+\hexa{9E} & 1 & The \cod{A} key was released ($\hexa{1E} + \hexa{80}$) \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\filetag{lytlnybl/kernel/drivers/keyboard.c}
+\begin{lstlisting}[style=c]
+if (scancode & KEY_RELEASED) {   /* KEY_RELEASED is 0x80 */
+    return;                      /* we ignore releases, except for modifiers */
+}
+\end{lstlisting}
+
+\section{Modifier keys}
+
+Shift and Control are different: what matters is not the event but the \emph{state}. The driver
+keeps a boolean for each and updates it on both press and release:
+
+\filetag{lytlnybl/kernel/drivers/keyboard.c}
+\begin{lstlisting}[style=c]
+bool keyboard_modifier_keys(uint8_t scancode) {
+    if (scancode == SHIFT_PRESS) {
+        shift_pressed = true;
+        return true;
+    } else if (scancode == (SHIFT_PRESS | KEY_RELEASED)) {
+        shift_pressed = false;
+        return true;
+    }
+
+    if (scancode == L_CTRL_PRESS) {
+        ctrl_pressed = true;
+        return true;
+    } else if (scancode == (L_CTRL_PRESS | KEY_RELEASED)) {
+        ctrl_pressed = false;
+        return true;
+    }
+
+    return false;
+}
+\end{lstlisting}
+
+Returning \cod{true} means ``I handled this, produce no character''. Two keymap tables then decide
+the result:
+
+\begin{lstlisting}[style=c]
+char c[2];
+c[0] = keymap[scancode];
+c[1] = '\0';
+/* ... */
+if (shift_pressed) {
+    c[0] = shift_keymap[scancode];
+}
+\end{lstlisting}
+
+\begin{warn}{Extended scancodes}
+Arrow keys, the right-hand Control, Home, End and others send a \hexa{E0} prefix followed by the
+real code. The driver detects the prefix and reads a second byte, but currently does nothing with
+it:
+\begin{lstlisting}[style=c]
+void keyboard_extended_scancodes() {
+    uint8_t scancode = inb(PS2_DATA);
+    if (scancode == 0x5B) { }   /* left GUI key: recognised, ignored */
+}
+\end{lstlisting}
+Implementing arrow keys --- and with them command history and line editing in the shell --- starts
+right here. It is one of the most rewarding extensions to attempt.
+\end{warn}
+
+\section{From keystroke to blocked process}
+
+This is the most interesting part of the driver, because it is where two subsystems meet. When a
+user program calls \cod{read(0, buffer, n)}, the kernel cannot answer immediately --- nobody has
+typed anything yet. So it \emph{blocks} the process:
+
+\filetag{lytlnybl/kernel/interrupts.c}
+\begin{lstlisting}[style=c]
+case SYSCALL_READ:
+    /* ... */
+    current_process->state = PROCESS_BLOCKED;
+    current_process->reading_state.buffer = (void*)regs->ecx;
+    current_process->reading_state.size   = regs->edx;
+    current_process->reading_state.count  = 0;
+    context_switch(current_process, get_next_process(), regs);
+    break;
+\end{lstlisting}
+
+The process is parked with a note attached: \emph{where} its buffer is, \emph{how big} it is, and
+\emph{how much} has been filled so far. Then the kernel switches to another process. The blocked one
+is simply never scheduled.
+
+Later, a key arrives and the keyboard handler walks the process list looking for anyone waiting:
+
+\filetag{lytlnybl/kernel/drivers/keyboard.c}
+\begin{lstlisting}[style=c]
+process_t* traversal_process = process_head;
+while (traversal_process) {
+  if (traversal_process->state == PROCESS_BLOCKED
+      && traversal_process->reading_state.size > 0) {
+
+    void* buffer = traversal_process->reading_state.buffer;
+    uint32_t size = traversal_process->reading_state.size;
+
+    /* a rather crude way of doing this (really only the context switcher
+     * should be changing cr3), but it works */
+    set_cr3((uintptr_t)traversal_process->page_directory);
+    ((char*)(buffer))[traversal_process->reading_state.count++] = c[0];
+    set_cr3((uintptr_t)kernel_directory);
+
+    if (traversal_process->reading_state.count >= size || c[0] == '\n') {
+      traversal_process->regs.eax = traversal_process->reading_state.count;
+      traversal_process->reading_state.count = 0;
+      traversal_process->reading_state.size = 0;
+      traversal_process->state = PROCESS_READY;   /* wake it up */
+    }
+  }
+  traversal_process = traversal_process->next;
+}
+\end{lstlisting}
+
+\begin{concept}{Why the CR3 dance}
+The buffer address (say \hexa{BFFFEF00}) is a \emph{virtual} address, and it only means anything
+inside that process's own address space. The keyboard interrupt, however, can arrive while a
+completely different process is running --- so \reg{CR3} points somewhere else and that address
+means something else entirely, or nothing at all.
+
+So the handler temporarily switches \reg{CR3} to the sleeping process's page directory, writes the
+byte, and switches back. It works because the kernel is identity-mapped into every process's
+directory, so the code keeps executing correctly throughout.
+
+The comment in the source is honest about this being crude, and it is right. A cleaner design keeps
+a kernel-side ring buffer, has the interrupt write only there, and copies into user memory later,
+when that process is the one actually running. That removes the \reg{CR3} manipulation from
+interrupt context entirely.
+\end{concept}
+
+\begin{concept}{Where the return value comes from}
+Look at \cod{traversal\_process->regs.eax = count;}. The count is written into the \emph{saved}
+register state of the sleeping process. Later, when the scheduler picks it, \cod{load\_context}
+copies that into the \cod{registers\_t} on the stack, and \cod{iret} restores it into the real
+\reg{EAX}.
+
+The user program called \cod{read()} and sees a number come back in \reg{EAX} --- with no idea that
+between the call and the return, seconds passed, other programs ran, and an interrupt filled its
+buffer. That illusion is the whole point of an operating system.
+\end{concept}
+
+\begin{danger}{The buffer is never NUL-terminated}
+The kernel fills \cod{count} bytes and returns \cod{count}. It never writes a \cod{'\textbackslash
+0'}. That is correct behaviour --- it matches Unix \cod{read()} --- but the shell then does:
+\begin{lstlisting}[style=c]
+char input[50];
+read(0, input, 50);
+input[strlen(input) - 1] = '\0';
+\end{lstlisting}
+\cod{strlen} on a buffer that was never terminated, and whose stack memory was never initialised,
+walks until it happens to find a zero. It works in practice because a freshly allocated stack page
+is zeroed, but it is reading uninitialised memory by luck. The correct form uses the return value:
+\begin{lstlisting}[style=c]
+int n = read(0, input, sizeof(input) - 1);
+if (n > 0 && input[n-1] == '\n') n--;
+input[n] = '\0';
+\end{lstlisting}
+Part XIII lists this among the fixes worth making.
+\end{danger}
+
+\section{Special keys}
+
+\filetag{lytlnybl/kernel/drivers/keyboard.c}
+\begin{lstlisting}[style=c]
+switch (c[0]) {
+    case 27:                 /* Escape */
+        vga_text_clear(&terminal);
+        break;
+    case '\t':
+        vga_text_write(&terminal, "    ");
+        break;
+    case '\b':
+        vga_text_backspace(&terminal);
+        /* deliberate fall-through */
+    case '\n':
+    default:
+        /* ... echo and deliver to the blocked process ... */
+        break;
+}
+\end{lstlisting}
+
+The missing \cod{break} after backspace is intentional: backspace must erase on screen \emph{and}
+still travel down to the process so it can shorten its buffer. The code below guards with
+\cod{if (c[0] != '\textbackslash b')} to avoid echoing it twice.
+
+It is correct, but it is exactly the kind of fall-through that a compiler warns about
+(\cod{-Wimplicit-fallthrough}) and that a reader assumes is a bug. A one-line comment saying
+``intentional'' would save the next person several minutes.
+
+\begin{tryit}
+Boot the system and press Escape at the shell prompt. The screen clears. That path goes: key
+$\rightarrow$ PIC $\rightarrow$ IRQ1 $\rightarrow$ \cod{irq\_handler} $\rightarrow$
+\cod{keyboard\_handler} $\rightarrow$ \cod{vga\_text\_clear}. Five subsystems for one keystroke, and
+all of them are yours.
+\end{tryit}
+
+\begin{recipe}{reading a line properly}{ch24-keyboard-input}
+A user program that reads a line, trims the newline, terminates it, and prints it back. Four lines
+of code, and they are the four the shell gets wrong.
+
+It reads \cod{sizeof(buf) - 1} to leave room for the terminator, uses the \emph{return value} rather
+than \cod{strlen} on an unterminated buffer, and only then writes the \cod{'\textbackslash 0'}.
+Compare it with the shell's version and the difference is the whole bug.
+\end{recipe}
+
+\begin{summary}
+The system has a heartbeat and it has ears. It can react to time and to the user. What it still
+cannot do is manage memory properly --- and without that, there are no real processes and no
+isolation. That is the next part, and the most important one in the course.
+\end{summary}
