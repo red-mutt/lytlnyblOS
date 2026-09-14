@@ -8,13 +8,13 @@ interrupts, memory management, processes, a filesystem, userspace, and a working
 The code in this repo is the code taught in the book. Every part of it corresponds to something
 explained in the book; this is the whole point of the project.
 
-Please use the website: **[📖 red-mutt.github.io/lytlnyblOS](https://red-mutt.github.io/lytlnyblOS/)** for reading, not the GitHub repository, for a better experience.
+**Please use the website: [📖 red-mutt.github.io/lytlnyblOS](https://red-mutt.github.io/lytlnyblOS/) for reading.** Not the GitHub repository, for a better experience.
 
 Here's a little video demo of what you'll be making:
 
 https://github.com/user-attachments/assets/f02ed3cf-41a2-4a80-85b7-0d6aa5f0f7ae
 
-This may not look like much to some, but remember it's your own custom operating system that you'll have the freedom to do whatever you want with by the end of the book! Every line of code will be written by you!
+This may not look like much to some, but remember: by the end of the book, you'll have your own custom operating system and the freedom to do whatever you want with it! You'll write every line of code!
 
 ## Read the book
 
@@ -67,7 +67,7 @@ No special hardware is required for this project. You will only need:
 -  Make
 -  GDB
 
-`make run` in `lytlnybl/` assembles the bootloader and kernel, links them, writes the result
+`make run` in `lytlnybl/` assembles the bootloader and kernel, links them, and writes the result
 into the disk image, and boots it in QEMU.
 
 This book assumes that you have access to many UNIX-like commands, like `dd`, `rm`, `mkdir`, and `cp`. Linux is the primary supported environment.
