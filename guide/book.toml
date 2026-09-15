@@ -6,8 +6,8 @@ language = "en"
 src = "src"
 
 [output.html]
-default-theme = "navy"
-preferred-dark-theme = "navy"
+default-theme = "frutiger-aero"
+preferred-dark-theme = "os-dark"
 git-repository-url = "https://github.com/red-mutt/lytlnyblOS"
 edit-url-template = "https://github.com/red-mutt/lytlnyblOS/edit/main/guide/{path}"
 no-section-label = true

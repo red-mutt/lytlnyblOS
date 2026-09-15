@@ -381,3 +381,107 @@
         --sidebar-header-border-color: #3473ad;
     }
 }
+
+.os-dark {
+    --bg: #111315;
+    --fg: #e6e6e6;
+
+    --sidebar-bg: #181b1e;
+    --sidebar-fg: #d4d7da;
+
+    --sidebar-non-existant: #666b70;
+    --sidebar-active: #e53935;
+
+    --sidebar-spacer: #30343a;
+
+    --scrollbar: #4a4f55;
+
+    --icons: #b8bdc3;
+    --icons-hover: #ffffff;
+
+    --links: #ef5350;
+
+    --inline-code-color: #ff8a80;
+
+    --theme-popup-bg: #1d2024;
+    --theme-popup-border: #444a50;
+
+    --searchbar-border-color: #444a50;
+    --searchbar-bg: #1b1e21;
+    --searchbar-fg: #e6e6e6;
+
+    --searchbar-shadow-color: rgba(0, 0, 0, 0.5);
+
+    --scrollbar-track: #1a1d20;
+
+    --quote-bg: #1b1e21;
+    --quote-border: #ef5350;
+
+    --warning-border: #ffb300;
+
+    --color-scheme: dark;
+}
+
+.os-dark .hljs {
+    background: #0b0d0f;
+    color: #e6e6e6;
+}
+
+.os-dark pre {
+    background: #0b0d0f;
+    border: 1px solid #30343a;
+}
+
+.frutiger-aero {
+    --bg: #eef9f4;
+    --fg: #263a35;
+
+    --sidebar-bg: #d7f0e5;
+    --sidebar-fg: #285247;
+    --sidebar-non-existant: #7a9d93;
+    --sidebar-active: #c93632;
+    --sidebar-spacer: #9acbb8;
+
+    --scrollbar: #72a997;
+
+    --icons: #4d8273;
+    --icons-hover: #1f5547;
+
+    --links: #0878a5;
+    --inline-code-color: #b72f2b;
+
+    --theme-popup-bg: rgba(241, 252, 248, 0.96);
+    --theme-popup-border: rgba(69, 137, 116, 0.55);
+    --theme-hover: rgba(122, 197, 172, 0.22);
+
+    --quote-bg: rgba(212, 242, 230, 0.55);
+    --quote-border: rgba(66, 153, 125, 0.65);
+
+    --warning-border: #d39a26;
+
+    --table-border-color: rgba(71, 137, 118, 0.35);
+    --table-header-bg: rgba(185, 226, 211, 0.7);
+    --table-alternate-bg: rgba(224, 244, 236, 0.55);
+
+    --searchbar-border-color: rgba(63, 135, 116, 0.55);
+    --searchbar-bg: rgba(255, 255, 255, 0.78);
+    --searchbar-fg: #263a35;
+    --searchbar-shadow-color: rgba(42, 112, 93, 0.2);
+
+    --searchresults-header-fg: #52766b;
+    --searchresults-border-color: rgba(65, 137, 116, 0.45);
+    --searchresults-li-bg: rgba(229, 247, 239, 0.92);
+    --search-mark-bg: #bce8d1;
+
+    --color-scheme: light;
+
+    --overlay-bg: rgba(215, 240, 229, 0.4);
+
+    --blockquote-note-color: #0878a5;
+    --blockquote-tip-color: #21834f;
+    --blockquote-important-color: #7957a8;
+    --blockquote-warning-color: #a56d16;
+    --blockquote-caution-color: #b72f2b;
+
+    --sidebar-header-border-color: #58a88b;
+}
