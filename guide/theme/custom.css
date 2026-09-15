@@ -1,0 +1,40 @@
+.book-star-cta {
+    display: flex;
+    align-items: center;
+    gap: 1.25em;
+    margin: 4em 0 2em;
+    padding: 1.25em 1.5em;
+    border: 1px solid var(--theme-popup-border);
+    border-radius: 10px;
+    background: var(--theme-hover);
+}
+
+.book-star-cta-icon {
+    flex: 0 0 auto;
+    font-size: 2em;
+    opacity: 0.7;
+}
+
+.book-star-cta-content {
+    flex: 1;
+}
+
+.book-star-cta strong {
+    display: block;
+    margin-bottom: 0.35em;
+    font-size: 1.05em;
+}
+
+.book-star-cta p {
+    margin: 0 0 0.75em;
+    opacity: 0.75;
+}
+
+.book-star-cta a {
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.book-star-cta a:hover {
+    text-decoration: underline;
+}
