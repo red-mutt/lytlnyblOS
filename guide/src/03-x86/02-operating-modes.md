@@ -22,7 +22,7 @@ Here is everything about real mode:
     the essential features required to bootstrap a computer system. It 
     lacks many of the advanced features that we will need in protected mode,
     such as memory protection.
--   Real mode also allows software to directly access memory and I/O
+-   Real mode also allows software to access memory and I/O directly
     without OS intervention, which allows for low-level manipulation of
     hardware components. It also allows us to use BIOS interrupts, which
     (like we used before) are commonly used during system boot-up and for
