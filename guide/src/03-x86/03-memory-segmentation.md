@@ -3,20 +3,20 @@
 > **_NOTE:_** This chapter aims to cover almost the entire x86 segmentation 
 architecture.
 This is to give you enough knowledge for most cases where you would be developing in 
-x86 architecture and everything said here is not strictly required for the creation of 
+x86 architecture, and everything said here is not strictly required for the creation of 
 our operating system. 
 I will be marking all optional knowledge with an **Optional** note.
-You could even skip this chapter and return to it in future when it's mentioned again.
+You could even skip this chapter and return to it in the future when it's mentioned again.
 
 What is memory? Well, physically, we can think of memory as just an
 array of bytes, each having a memory address that is just a numerical
-value. Which we commonly store in base 16; this is our physical view of memory.
+value. We commonly store in base 16; this is our physical view of memory.
 We need a logical view of memory that can make a lot of things much
 easier. This is where memory segmentation comes in.
 
 Memory segmentation in x86 architecture is a mechanism that divides the
 address space into segments to allow for more flexible memory management and
-protection. Understanding is important when developing an
+protection. Understanding it is important when developing an
 operating system for x86 platforms, as in protected mode, memory segmentation is 
 part of the address translation process. However, you can configure it to work alongside
 other memory management methods like paging.
@@ -56,7 +56,7 @@ is 16 bits, so a segment can address up to 64KiB. In real mode, we have
 -   SS: used to define a stack segment
 -   DS: used to define a data segment
 
-There's also other registers that we can use:
+There are also other registers that we can use:
 
 -   ES: A segment register that provides flexibility in memory
     access, used when you need to access more segments without
@@ -67,7 +67,7 @@ There's also other registers that we can use:
     memory access.
 
 Each segment register contains a segment value, which is used to 
-calculate the segment's base addresses. We can reach any byte within 
+calculate the segment's base address. We can reach any byte within 
 that segment by using an offset.
 
 Let's look at an example for memory segmentation.
@@ -81,13 +81,13 @@ for the current code segment we are trying to run.
 x86 always runs with memory segmentation in mind, so when we use a near `jmp`
 instruction, we are changing the instruction pointer to a new 
 offset within the current code segment, so let's
-say we write `jmp 100d`, we are actually jumping to the offset of 100d
+say we write `jmp 100d`; we are actually jumping to the offset of 100d
 inside the current code segment. This also happens internally with the
 PC (program counter), where the instruction pointer (`IP` in 16-bit mode) 
 stores the offset of the next instruction. Any jump to a location
 in the same code segment is called a near jump/call; otherwise, it's
 called a far jump. To do far jumps, you can do stuff like `jmp
-900:1d`, this will load `900d` into `cs` and `1d` into `ip`.
+900:1d`; this will load `900d` into `cs` and `1d` into `ip`.
 
 The same general idea applies to data and stack segments; it
 was just easy to show using and jump/call because the
@@ -102,7 +102,7 @@ now that you know everything you need to know about memory segmentation
 in real mode.
 
 The first thing we will look at goes all the way back to when we wrote
-our printing code together, this is in the start label, here:
+our printing code together; this is in the start label, here:
 
 ```x86asm
     mov ax, 07C0h
@@ -111,35 +111,35 @@ our printing code together, this is in the start label, here:
 
 It's worth noting that the `cs` register is already set to 07C0h
 in our bootloader setup. We also set the same value to the DS register.
-This ensures the bootloader can correctly access its own code and data
-correctly. But you might ask, "why do we need to load the location
-into `ax` and then `ds`?". This is because we can't load an immediate value
+This ensures the bootloader can correctly access its own code and data. 
+But you might ask, "why do we need to load the location
+into `ax` and then `ds`?" This is because we can't load an immediate value
 directly into a segment register, so we use `ax` as an intermediary register
 to load into `ds`.
 
 Moving on, the next place we used memory segmentation
 
 This is when we were trying to load the kernel into memory from the
-bootloader. More specifically, this was when We were trying to use the
+bootloader. More specifically, this was when we were trying to use the
 `INT 13h`, `ah = 02h` service, which is the BIOS service for reading sectors
-from a disk into memory. Which we see in this code here:
+from a disk into memory. Which we see in this code:
 
 ```x86asm
     load_kernel_from_disk:
     mov ax, 0900h
     mov es, ax
 
-    mov ah, 02h ; service number, 
+    mov ah, 02h ; service number
     mov al, 01h ; number of sectors we want to read from (only simple kernel for now, so less than 512 bytes)
 
     mov ch, 0h ; low 8 bits of the cylinder number, which is 0.
-    mov cl, 02h ; sector number we would like to read, this is the second sector
+    mov cl, 02h ; sector number we would like to read; this is the second sector
 
-    mov dh, 0h ; the head number we would like to read from, this is head 0.
-    mov dl, 80h ; BIOS drive number, 80h is the first fixed disk 
+    mov dh, 0h ; the head number we would like to read from; this is head 0.
+    mov dl, 80h ; BIOS drive number; 80h is the first fixed disk 
 
     mov bx, 0h ; memory address where the content will be loaded
-    int 13h ; int 13h provides bios disk services
+    int 13h ; int 13h provides BIOS disk services
 ```
 
 Here, what we do first is store 0900h into the extra segment register, so 
@@ -147,7 +147,7 @@ the BIOS read will use 0900h as the segment for the destination address. You see
 interrupt `13h`, `ah = 02h` service loads the requested sectors
 into the memory address `es:bx` (where `bx` is the offset).
 
-Then after we do that, we can perform a far jump to the segment 
+Then, after we do that, we can perform a far jump to the segment 
 where the kernel was loaded. It's worth noting that a far
 jump changes the value of the `cs` register to wherever you jump to; in
 this case, it's set to 0900h, which makes the kernel's code segment base
@@ -160,7 +160,7 @@ from the same segment.
 We have got down how memory segmentation works in real mode, and even
 know how it's used in our bootloader. That's pretty good; now we've
 just got to cover protected mode, and we're done with memory
-segmentation and can move onto the run time stack.
+segmentation and can move on to the runtime stack.
 
 The basic idea of memory segmentation in protected mode is similar 
 to real mode. But protected mode adds descriptor tables and protection
@@ -181,7 +181,7 @@ deal with that segment. For instance, the starting memory address of the
 segment is stored, and the size/limit of the segment is stored.
 
 Furthermore, as we have this focus around the GDT, our segment registers
-from real mode no longer store direct addresses, they store segment
+from real mode no longer store direct addresses; they store segment
 selectors.
 
 ### The structure of the segment descriptor, a basic overview
@@ -229,7 +229,7 @@ to turn a logical memory address into a linear memory address.
 
 For the 32-bit protected mode we are using, a logical address consists
 of a 16-bit segment selector and an offset. The offset can be up to 32 bits. 
-When this is logical address gets generated by currently running code, 
+When this logical address is generated by currently running code, 
 the processor uses the segment selector to obtain the segment descriptor
 and then uses the descriptor to calculate the linear address.
 
@@ -245,7 +245,7 @@ address.
 
 During this process of translation, other information from the segment descriptor
 is also used to provide memory protection. One of these pieces of
-information is called the limit of a segment, the limit defines the highest offset that 
+information is called the limit of a segment; the limit defines the highest offset that 
 can be used for a segment. If an access uses an offset outside the allowed range,
 the processor generates a protection exception.
 
@@ -265,7 +265,7 @@ units. To see what this means, assume the value of the limit field is
 `21 x 4 KiB = 84 KiB`.
 
 Because the size of the segment limit field is 20 bits, this means that
-the maximum numeric value it can represent is `2^20 - 1`, this means that if the
+the maximum numeric value it can represent is `2^20 - 1`. This means that if the
 G flag is `0`, the maximum effective segment size is 1MiB when G is 0, and 4GiB when 
 G is 1.
 
@@ -279,11 +279,11 @@ Manual (Volume 3A)," seen here:
 
 The first 16 bits (bit 0-15) are the first 16 bits of the segment's
 limit. The next 24 bits are the first 24 bits of the segment's base,
-then we have our type field, S flag, DPL field, P flag, Then we have the
-next nibble of our limit, the AVL flag, the L flag (for 64 bit), the DB
+then we have our type field, S flag, DPL field, P flag. Then we have the
+next nibble of our limit, the AVL flag, the L flag (for 64-bit), the DB
 flag, the G flag, and the next section of our base.
 
-You may be wondering, why is the segment descriptor formatted so
+You may be wondering why the segment descriptor is formatted so
 strangely? And this layout is inherited from the 80286 descriptor format; 
 here is a similar diagram seen from the
 Intel 80286 Programmer's Reference Manual:
@@ -291,19 +291,19 @@ Intel 80286 Programmer's Reference Manual:
 ![Old Descriptor](../images/os/olddescriptor.png)
 
 On the 80286 diagram, the base size was 24 bits, and the limit's size
-was 16 bits, then we just extend this for our newer processor
+was 16 bits; then we just extend this for our newer processor
 architecture.
 
 ### A segment's type
 
 When a segment gets defined, the processor should know how to interpret
 the content inside this segment; this is defined by the segment's type.
-We know so far that there are code segments and data segments, these
+We know so far that there are code segments and data segments; these
 two types belong to a category of segments called application segments;
 there is another category called system segments, and many types of
 segments belong to it.
 
-Whether a specific segment is an application or system segment, gets
+Whether a specific segment is an application or system segment is
 defined in the S flag. Also known as the descriptor type flag, which is
 bit 4 of the fifth byte of the segment descriptor. When the S
 flag is 0, the segment is considered a system segment; when it's an
@@ -312,16 +312,16 @@ flag is 1.
 
 The only application segments are code and data. If some application
 segment is referenced by currently running code, the processor will go
-to the descriptor of this segment and by reading the S flag (which
+to the descriptor of this segment and read the S flag (which
 should be 1). It should know that the segment in question is an
 application segment, but how does it know whether it's a data or code
-segment? This info is stored the type field in the
+segment? This info is stored in the type field in the
 segment descriptor.
 
 The type field is the low 4 bits of the fifth byte of the segment descriptor.
 The most significant bit specifies if the application
 segment is a code or data segment; the least significant specifies
-whether the segment has been accessed or not; When the value of this is
+whether the segment has been accessed or not. When the value of this is
 1, this means that the segment has been written to or read from, but if
 it's 0, this means that the segment has not been accessed. The processor sets 
 the accessed bit when the segment is accessed after its descriptor is loaded 
@@ -356,7 +356,7 @@ Why would we want this? Well, the
 kernel can sometimes provide code that is basic and may be needed by
 many programs. This code would have a privilege level of 0, as it's a
 part of the kernel and would gain the highest privilege level; 
-any other programs, which would have a lower privilege level wouldn't
+any other programs, which would have a lower privilege level, wouldn't
 really be able to call this without the conforming flag. This is why
 it's needed.
 
@@ -368,9 +368,9 @@ is called the writeable flag (W flag).
 
 The write-enabled flag gives us the ability to decide whether we want
 our data segment to be read-only or not; when set to 0, the data will be read-only;
-when set to 1, the data segment is writeable.
+when set to 1, the data segment is writable.
 
-The expansion-direction flag will be covered when I move onto the x86
+The expansion-direction flag will be covered when I move on to the x86
 run-time stack. For a vague definition now, we could say that when the value of 
 the flag is 0, the data segment is an expand-up segment, but when the value is 1,
 it's an expand-down segment. (These are Intel's terms, so don't blame me).
@@ -382,29 +382,29 @@ segments, subject to the processor's privilege checks.
 
 ### Privilege levels in segments
 
-Prior, I have probably stated that a segment descriptor has a privilege level, 
+Previously, I have probably stated that a segment descriptor has a privilege level, 
 and based on this, there are rules for how certain
 segments can interact based on these privilege levels. Which the
 processor would enforce; these privilege levels are defined by the
 descriptor privilege level (DPL) in the segment descriptor; as this is a
-2 bit value, the possible privilege levels are 0, 1, 2, and 3, the DPL bits
+2-bit value, the possible privilege levels are 0, 1, 2, and 3; the DPL bits
 5 and 6 of the fifth byte of a descriptor.
 
 ### The other flags: The D/B flag
 
-There's only 3 flags left that I haven't covered. The first is a flag
+There are only 3 flags left that I haven't covered. The first is a flag
 whose name changes depending on the segment it resides within; it is
-located within the second. Most significant bit in byte 6 when it within
-a code segment, it's called the default operation size flag (D flag),
+located within the second. Most significant bit in byte 6 when it is within
+a code segment; it's called the default operation size flag (D flag),
 When the processor executes the instructions, it uses the D flag to
 choose the length of the operands, depending on the currently executing
-instruction. If the D flag is 1, the default operand size is 32 bits and the 
+instruction. If the D flag is 1, the default operand size is 32 bits, and the 
 default address size is 32 bits; if it's 0, both default to 16 bits. Individual
 instructions can use prefixes to override these default sizes when supported.
 
 When the segment is a stack segment, the same flag is called the default
 stack pointer size flag (B flag), and it determines the default stack-address size
-used by stack instructions. Which is commonly known as the stack
+used by stack instructions. This is commonly known as the stack
 pointer, used by stack instructions such as push and pop. When the value
 of the B flag is 1, then the size of the stack pointer will be 32 bits,
 and stack instructions use ESP as the stack pointer. When the value of
@@ -440,7 +440,7 @@ descriptor table, but it also stores the limit of the table. To load a
 value into the register of the GDTR, 
 the `lgdt` instruction must be used; this stands for "load global
 descriptor table." It takes one memory operand containing the `GDT`'s linear base address and limit. 
-These operands structure should be similar to the actual
+This operand structure should be similar to the actual
 structure of the GDTR, which is shown here:
 
 ![GDTR Diagram](../images/os/GDTR%20diagram.png)
@@ -460,7 +460,7 @@ is a 16-bit number, so the maximum GDT size is 64KiB (65536 bytes).
 
 The GDT is a system-wide descriptor table that can be used by all 
 processes. x86 also gives us the power to create local
-descriptor tables (LDTs) in protected-mode, An LDT contains segment descriptors like a GDT,
+descriptor tables (LDTs) in protected mode. An LDT contains segment descriptors like a GDT,
 but it is associated with a particular LDT descriptor and can be used for a more local set of 
 segments. Multiple of these LDTs can be
 made; each one can be private to a specific process currently running on
@@ -485,7 +485,7 @@ and loads the LDT's base address, limit, and attributes into the LDTR.
 ### More on the segment selector
 
 In reality, the way we described the segment selector before as an
-index, is not actually true; the index is only one part of the segment
+index is not actually true; the index is only one part of the segment
 selector. A full diagram of it can be seen here:
 
 ![Segment Selector](../images/os/segmentselector.png)
