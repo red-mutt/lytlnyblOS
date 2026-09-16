@@ -126,7 +126,7 @@ This means that we can’t use any OS interrupts to print to the screen, read fr
 or anything else we would have taken for granted when doing our regular programming.
 
 This is a good decomposition of the problem of writing our own bootloader; even now, you could stop reading.
-And Google how to do these steps. It’s good to decompose problems for a massive subject like making your own OS.
+And Google how to do these steps. It’s good to break down a massive subject like making your own OS.
 It can help us learn about the individual aspects rather than getting overwhelmed with information when we Google 
 “how to make a bootloader.” Instead, you 
 can Google “how to print to BIOS in NASM” and “how to read from a hard disk in BIOS NASM.”
