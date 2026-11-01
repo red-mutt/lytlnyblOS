@@ -4,6 +4,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/// VGA CURSOR PORTS
+#define CRTC_INDEX    0x3D4
+#define CRTC_DATA     0x3D5
+#define CRTC_HIGH_REG 0x0E
+#define CRTC_LOW_REG  0x0F
+
 typedef enum {
     VGA_COLOR_BLACK = 0,
     VGA_COLOR_BLUE,
@@ -44,9 +50,7 @@ void vga_text_clear(vga_text* terminal);
 
 /* cursor ops */
 void vga_text_set_cursor(
-    vga_text* terminal,
-    size_t row,
-    size_t column
+    vga_text* terminal
 );
 
 /* Color ops */

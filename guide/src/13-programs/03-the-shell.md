@@ -241,10 +241,16 @@ void syscall_handler(registers_t* regs) {
                 case FS_RUN:
                     process_t* child = load_program(path);
 
+                    if (child == NULL) {
+                        regs->eax = -1; 
+                        return; 
+                    }
+
                     child->parent_pid = current_process->pid;
 
                     current_process->pid_waiting_for = child->pid;
                     current_process->state = PROCESS_BLOCKED;
+                    regs->eax = 0;
                     context_switch(current_process, get_next_process(), regs);
                     break;
             }
@@ -265,9 +271,11 @@ void syscall_handler(registers_t* regs) {
 
 The largest addition here is `SYSCALL_FSOPS`, because there are a multitude of syscalls that only require
 the path as a parameter, I just bunched these up into one large syscall. `ls`, `mkdir`, `touch`, and `rm` are all
-obvious in how they work. But with the `run` syscalls, we must create a child process by using the `load_program`
-function that we just wrote. The `current_process` must store the PID of the process it's waiting for and be set
-to blocked. A context switch must also happen, so the current process doesn't continue.
+obvious in how they work. But with the `run` syscall, we must create a child process by using the `load_program`
+function that we just wrote. If `load_program` fails (such as when the file does not exist), we set `regs->eax = -1`
+and return immediately to avoid blocking the caller waiting on a child that never spawned. Otherwise, we set
+`regs->eax = 0`, store the child PID in `pid_waiting_for`, and mark `current_process` as blocked. A context switch
+must then happen so the current process yields execution.
 
 The parent process would be unblocked here:
 ```c
@@ -304,8 +312,8 @@ the file descriptor.
 
 Then these:
 ```c
-void fs_ops(uint8_t operation, char* path) {
-  syscall(SYSCALL_FSOPS, operation, (uint32_t)path, 0);
+int fs_ops(uint8_t operation, char* path) {
+  return syscall(SYSCALL_FSOPS, operation, (uint32_t)path, 0);
 }
 
 int open(const char* path) {
@@ -499,7 +507,7 @@ bool execute_command(char** words, size_t word_count) {
     fs_ops(FS_RM, words[1]);
   } 
   else if (strcmp(words[0], "run") == 0) {
-    fs_ops(FS_RUN, words[1]);
+    return fs_ops(FS_RUN, words[1]) == -1 ? false : true;
   }
   else if (strcmp(words[0], "cat") == 0) {
     fd = open(words[1]);

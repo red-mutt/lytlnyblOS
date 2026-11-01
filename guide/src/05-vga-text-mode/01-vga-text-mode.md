@@ -12,6 +12,12 @@ freedom. Here is the header file that I have created:
 #include <stddef.h>
 #include <stdint.h>
 
+/// VGA CURSOR PORTS
+#define CRTC_INDEX    0x3D4
+#define CRTC_DATA     0x3D5
+#define CRTC_HIGH_REG 0x0E
+#define CRTC_LOW_REG  0x0F
+
 typedef enum {
     VGA_COLOR_BLACK = 0,
     VGA_COLOR_BLUE,
@@ -52,9 +58,7 @@ void vga_text_clear(vga_text* terminal);
 
 /* cursor ops */
 void vga_text_set_cursor(
-    vga_text* terminal,
-    size_t row,
-    size_t column
+    vga_text* terminal
 );
 
 /* Color ops */
@@ -115,6 +119,7 @@ text entries instead of just characters as I did.
 
 ```c
 #include "vga_text.h"
+#include "kernel/interrupts.h"
 
 void vga_text_init(vga_text* terminal) {
     terminal->row = 0;
@@ -143,16 +148,21 @@ void vga_text_clear(vga_text* terminal) {
     
     terminal->row = 0;
     terminal->column = 0;
-    
+
+    vga_text_set_cursor(terminal);
 }
 
 void vga_text_set_color(vga_text* terminal, vga_color f, vga_color b) {
     terminal->color = ((uint8_t)b << 4) | (uint8_t)f; 
 }
 
-void vga_text_set_cursor(vga_text* terminal, size_t row, size_t column) {
-    terminal->row = row;
-    terminal->column = column;
+void vga_text_set_cursor(vga_text* terminal) {
+    size_t cursor_pos = terminal->row * terminal->width + terminal->column;
+
+    outb(CRTC_INDEX, CRTC_HIGH_REG);
+    outb(CRTC_DATA, (uint8_t)(cursor_pos >> 0x8)); /// Write the high byte of the cursor position
+    outb(CRTC_INDEX, CRTC_LOW_REG);
+    outb(CRTC_DATA, (uint8_t)(cursor_pos & 0xFF)); /// Write the low byte of the cursor position
 }
 
 void vga_text_putchar(vga_text* terminal, char c) {
@@ -172,6 +182,8 @@ void vga_text_write(vga_text* terminal, const char* string) {
         terminal->column = pos % terminal->width;
         terminal->row = terminal->row % terminal->height;
     }
+
+    vga_text_set_cursor(terminal);
 }
 
 void vga_text_writeline(vga_text* terminal, const char* string) {
@@ -179,6 +191,8 @@ void vga_text_writeline(vga_text* terminal, const char* string) {
     terminal->column = 0;
     terminal->row++;
     terminal->row = terminal->row % terminal->height;
+
+    vga_text_set_cursor(terminal);
 }
 
 void vga_text_write_dec(vga_text* terminal, uint32_t value) {
@@ -199,6 +213,8 @@ void vga_text_write_dec(vga_text* terminal, uint32_t value) {
         vga_text_putchar(terminal, buffer[--digits]);
         terminal->column++;
     }
+
+    vga_text_set_cursor(terminal);
 }
 
 void vga_text_write_hex(vga_text* terminal, uint32_t value) {
@@ -226,6 +242,8 @@ void vga_text_write_hex(vga_text* terminal, uint32_t value) {
         vga_text_putchar(terminal, buffer[--digits]);
         terminal->column++;
     }
+
+    vga_text_set_cursor(terminal);
 }
 
 void vga_text_put_entry_at(
@@ -247,6 +265,12 @@ void vga_text_put_entry_at(
 the cursor. The higher-level writing functions are responsible for moving the cursor.
 This is the inverse to what you might expect for `putfoo()` functions, so I just thought I'd point
 that out.
+
+Notice that `vga_text_set_cursor()` also synchronizes our row and column with the physical VGA
+hardware cursor. Writing characters to `0xB8000` only updates what is stored in video memory; the VGA
+hardware renders the blinking underline cursor independently. To update its position on screen,
+we calculate the flat index (`row * width + column`) and send its high and low bytes to the CRTC 
+registers via `outb` using the VGA control ports (`0x3D4` and `0x3D5`).
 
 The decimal and hexadecimal functions currently assume that there is enough
 space remaining on the current row. Unlike `vga_text_write()`, they do not handle reaching

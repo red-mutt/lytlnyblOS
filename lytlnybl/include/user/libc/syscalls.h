@@ -30,7 +30,7 @@ void sleep(uint32_t ticks);
 int write(int fd, void *buff, size_t count);
 int read(int fd, void* buff, size_t count);
 void* sbrk (intptr_t increment);
-void fs_ops(uint8_t operation, char* path);
+int fs_ops(uint8_t operation, char* path);
 int open(const char* path);
 void close(int fd);
 

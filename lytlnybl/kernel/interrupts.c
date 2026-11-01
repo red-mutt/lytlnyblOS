@@ -185,13 +185,12 @@ void syscall_handler(registers_t* regs) {
             
             //allocate more pages
             while (((current_process->user_heap_end + 4096) - USER_HEAP_START) / 4096 
-                > current_process->heap_pages_allocated){
+                > current_process->heap_pages_allocated) {
                 map_page(current_process->page_directory,
                     USER_HEAP_START + (current_process->heap_pages_allocated++ * 4096),
                     (uintptr_t)alloc_frame(),
                     PAGE_PRESENT | PAGE_USER | PAGE_WRITABLE
                 );
-                    
             }
 
             regs->eax = current_process->user_heap_end;
@@ -216,10 +215,16 @@ void syscall_handler(registers_t* regs) {
                 case FS_RUN: {
                     process_t* child = load_program(path);
 
+                    if (child == NULL) {
+                        regs->eax = -1; 
+                        return; 
+                    }
+
                     child->parent_pid = current_process->pid;
 
                     current_process->pid_waiting_for = child->pid;
                     current_process->state = PROCESS_BLOCKED;
+                    regs->eax = 0;
                     context_switch(current_process, get_next_process(), regs);
                     break;
                 }
