@@ -20,7 +20,6 @@ int write(int fd, void *buff, size_t count) {
   return syscall(SYSCALL_WRITE, fd, (uint32_t)buff, count);
 }
 
-
 int read(int fd, void* buff, size_t count) {
   return syscall(SYSCALL_READ, fd, (uint32_t)buff, count);
 }
@@ -29,8 +28,8 @@ void* sbrk (intptr_t increment) {
   return (void*)syscall(SYSCALL_SBRK, increment, 0, 0);
 }
 
-void fs_ops(uint8_t operation, char* path) {
-  syscall(SYSCALL_FSOPS, operation, (uint32_t)path, 0);
+int fs_ops(uint8_t operation, char* path) {
+  return syscall(SYSCALL_FSOPS, operation, (uint32_t)path, 0);
 }
 
 int open(const char* path) {

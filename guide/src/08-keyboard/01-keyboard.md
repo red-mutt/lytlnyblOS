@@ -515,6 +515,7 @@ void vga_text_backspace(vga_text* terminal) {
         }
     }
     vga_text_putchar(terminal, ' ');
+    vga_text_set_cursor(terminal);
 }
 
 char vga_text_getchar(vga_text* terminal) {

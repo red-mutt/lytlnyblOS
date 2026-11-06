@@ -1,4 +1,5 @@
 #include "kernel/drivers/vga_text.h"
+#include "kernel/interrupts.h"
 
 void vga_text_init(vga_text* terminal) {
     terminal->row = 0;
@@ -27,16 +28,21 @@ void vga_text_clear(vga_text* terminal) {
     
     terminal->row = 0;
     terminal->column = 0;
-    
+
+    vga_text_set_cursor(terminal);
 }
 
 void vga_text_set_color(vga_text* terminal, vga_color f, vga_color b) {
     terminal->color = ((uint8_t)b << 4) | (uint8_t)f; 
 }
 
-void vga_text_set_cursor(vga_text* terminal, size_t row, size_t column) {
-    terminal->row = row;
-    terminal->column = column;
+void vga_text_set_cursor(vga_text* terminal) {
+    size_t cursor_pos = terminal->row * terminal->width + terminal->column;
+
+    outb(CRTC_INDEX, CRTC_HIGH_REG);
+    outb(CRTC_DATA, (uint8_t)(cursor_pos >> 0x8)); /// Write the high byte of the cursor position
+    outb(CRTC_INDEX, CRTC_LOW_REG);
+    outb(CRTC_DATA, (uint8_t)(cursor_pos & 0xFF)); /// Write the low byte of the cursor position
 }
 
 void vga_text_putchar(vga_text* terminal, char c) {
@@ -66,6 +72,8 @@ void vga_text_write(vga_text* terminal, const char* string) {
         terminal->column = pos % terminal->width;
         terminal->row = terminal->row % terminal->height;
     }
+
+    vga_text_set_cursor(terminal);
 }
 
 void vga_text_writeline(vga_text* terminal, const char* string) {
@@ -73,6 +81,8 @@ void vga_text_writeline(vga_text* terminal, const char* string) {
     terminal->column = 0;
     terminal->row++;
     terminal->row = terminal->row % terminal->height;
+
+    vga_text_set_cursor(terminal);
 }
 
 void vga_text_writelength(vga_text* terminal, const char* string, size_t length) {
@@ -88,7 +98,9 @@ void vga_text_writelength(vga_text* terminal, const char* string, size_t length)
         terminal->row = pos / terminal->width;
         terminal->column = pos % terminal->width;
         terminal->row = terminal->row % terminal->height;
-    } 
+    }
+
+    vga_text_set_cursor(terminal);
 }
 
 void vga_text_write_dec(vga_text* terminal, uint32_t value) {
@@ -109,6 +121,8 @@ void vga_text_write_dec(vga_text* terminal, uint32_t value) {
         vga_text_putchar(terminal, buffer[--digits]);
         terminal->column++;
     }
+
+    vga_text_set_cursor(terminal);
 }
 
 void vga_text_write_hex(vga_text* terminal, uint32_t value) {
@@ -136,6 +150,8 @@ void vga_text_write_hex(vga_text* terminal, uint32_t value) {
         vga_text_putchar(terminal, buffer[--digits]);
         terminal->column++;
     }
+
+    vga_text_set_cursor(terminal);
 }
 
 void vga_text_put_entry_at(
@@ -163,5 +179,7 @@ void vga_text_backspace(vga_text* terminal) {
             terminal->column--;
         }
     }
+
     vga_text_putchar(terminal, ' ');
+    vga_text_set_cursor(terminal);
 }

@@ -30,9 +30,6 @@ void start(void) {
     memset(input, 0, strlen(input));
     word_count = 0;
     free(words);
-
-
-    
   }
 }
 
@@ -56,7 +53,7 @@ bool execute_command(char** words, size_t word_count) {
     fs_ops(FS_RM, words[1]);
   } 
   else if (strcmp(words[0], "run") == 0) {
-    fs_ops(FS_RUN, words[1]);
+    return fs_ops(FS_RUN, words[1]) == -1 ? false : true;
   }
   else if (strcmp(words[0], "cat") == 0) {
     fd = open(words[1]);
